@@ -1,40 +1,11 @@
+import functools
+import json
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import List, Any
+from dataclasses import dataclass
+from typing import List
 
+import tensorflow as tf
 import yaml
-import slab
-
-'''
-Structure (old):
-Config
-    generate_brirs: BRIRConfig
-        hrtfs: List[str]
-        source_positions: SourcePositionsConfig
-            azimuth: RangeConfig
-                start: int
-                stop: int
-                step: int
-            elevation: RangeConfig
-                start: int
-                stop: int
-                step: int
-        room_configs: List[RoomConfig]
-            room_id: int
-            width: float
-            length: float
-            height: float
-        persist_brirs_individually: bool
-    generate_cochleagrams: CochleagramConfig
-        hrtf_labels: List[str]
-        stim_paths: List[str]
-        bkgd_path: str
-        use_bkgd: bool
-    model_playground: ModelPlaygroundConfig
-        hrtf_labels: List[str]
-        model_path: str
-        models_to_use: List[int]
-'''
 
 
 @dataclass
@@ -79,7 +50,7 @@ class CochleagramConfig:
 class FreezeTrainingConfig:
     labels: List[str]
     models_to_use: List[int]
-    ngrams: List[int]
+    layer_block_lengths: List[int]
 
 
 @dataclass
@@ -156,7 +127,7 @@ def load_config(file_path: str) -> Config:
         freeze_training=FreezeTrainingConfig(
             labels=raw_config['freeze_training']['labels'],
             models_to_use=raw_config['freeze_training']['models_to_use'],
-            ngrams=raw_config['freeze_training']['ngrams']
+            layer_block_lengths=raw_config['freeze_training']['layer_block_lengths']
         ),
         run_models=RunModelsConfig(
             folder=raw_config['run_models']['folder'],
@@ -218,3 +189,142 @@ def loc_to_CNNpos(azim, elev):
     div = elev // 10
     mod = azim // 5
     return div * 72 + mod
+
+
+def single_example_parser(example):
+    """
+    Takes a serialized Example proto and parses it into a tuple of (image, target) tensors.
+    Used when loading TFRecord datasets for training and inference.
+
+    Args:
+        example: A serialized Example proto containing the features 'train/image' and 'train/target' (for TF2.14) or 'image' and 'target' (for TF2.16).
+
+    Returns:
+        A tuple (image, target) where:
+        - image: A tensor of shape (39, 8000, 2) containing the cochleagram data.
+        - target: A scalar tensor containing the class label (class index 0-503) for the example.
+
+    """
+
+    feature_description = {
+        'train/image': tf.io.FixedLenFeature([], tf.string),  # use with TF2.14
+        'train/target': tf.io.FixedLenFeature([], tf.int64)  # use with TF2.14
+
+        # 'image': tf.io.FixedLenFeature([], tf.string),  # use with TF2.16
+        # 'target': tf.io.FixedLenFeature([], tf.int64)  # use with TF2.16
+        }
+    example = tf.io.parse_single_example(example, feature_description)
+
+    example['train/image'] = tf.reshape(tf.io.decode_raw(example['train/image'], tf.float32), (39, 8000, 2))  # use with TF2.14
+    # example['image'] = tf.reshape(tf.io.decode_raw(example['image'], tf.float32), (39, 8000, 2))  # use with TF2.16
+
+    return example['train/image'], example['train/target'] # use with TF2.14
+    # return example['image'], example['target']  # use with TF2.16
+
+
+def persistent_cache(func):
+    """
+    Simple persistent cache decorator.
+    Creates a "cache/" directory if it does not exist and writes the
+    caches of the given func to the file "cache/<func-name>.cache"
+    """
+    file_path = Path(f'cache/{func.__name__}.cache')
+    file_path.parent.mkdir(exist_ok=True)
+    try:
+        with open(file_path, 'r') as f:
+            cache = json.load(f)
+    except (IOError, ValueError):
+        cache = {}
+
+    @functools.wraps(func)
+    def wrapper(*args, persistent_cache_key=None, **kwargs):
+        """
+            :param persistent_cache_key: The key to use for the cache. If None, the arguments of the function are used.
+        """
+        if persistent_cache_key:
+            persistent_cache_key = str(persistent_cache_key)
+        else:
+            assert args or kwargs, f'Cannot create key without arguments or explicit key. Use persistent_cache_key=<key> or provide other arguments to {func.__name__}()'
+            persistent_cache_key = str(args) + str(kwargs)
+
+        if persistent_cache_key not in cache:
+            cache[persistent_cache_key] = func(*args, **kwargs)
+            with open(file_path, 'w') as f:
+                json.dump(cache, f)
+        return cache[persistent_cache_key]
+
+    return wrapper
+
+
+def get_model_memory_usage(batch_size, model):
+    """
+    Usage: print(get_model_memory_usage(16, create_model(Path('../models/net_weights/net1'))))
+    """
+    import numpy as np
+    try:
+        from keras import backend as K
+    except:
+        from tensorflow.keras import backend as K
+
+    shapes_mem_count = 0
+    internal_model_mem_count = 0
+    for l in model.layers:
+        layer_type = l.__class__.__name__
+        if layer_type == 'Model':
+            internal_model_mem_count += get_model_memory_usage(batch_size, l)
+        single_layer_mem = 1
+        out_shape = l.output_shape
+        if type(out_shape) is list:
+            out_shape = out_shape[0]
+        for s in out_shape:
+            if s is None:
+                continue
+            single_layer_mem *= s
+        shapes_mem_count += single_layer_mem
+
+    trainable_count = np.sum([K.count_params(p) for p in model.trainable_weights])
+    non_trainable_count = np.sum([K.count_params(p) for p in model.non_trainable_weights])
+
+    number_size = 4.0
+    if K.floatx() == 'float16':
+        number_size = 2.0
+    if K.floatx() == 'float64':
+        number_size = 8.0
+
+    total_memory = number_size * (batch_size * shapes_mem_count + trainable_count + non_trainable_count)
+    gbytes = np.round(total_memory / (1024.0 ** 3), 3) + internal_model_mem_count
+    return gbytes
+
+
+def compute_layer_block_indices(path_to_indices: Path, net_id: int, block_lengths: List[int]) -> list:
+    """
+    Take a model and return a list containing the indices of consecutive layer blocks for each conv2d layer.
+    Additionally return those indices with the Dense layer added.
+    """
+    with open(path_to_indices, 'r') as f:
+        layer_indices = eval(f.read())
+    print(f'Loaded layer indices from models/keras/layer_indices.txt: {layer_indices}')
+
+    conv2d_indices = layer_indices[f'net{net_id}']['conv2d']
+    dense_index = layer_indices[f'net{net_id}']['dense']
+
+    layer_block_indices = []
+    # Get the layer block indices
+    for i in range(len(conv2d_indices)):
+        for j in range(len(conv2d_indices)):
+            if conv2d_indices[i:j + 1]:
+                if (j - i + 1) in block_lengths:
+                    layer_block_indices.append(conv2d_indices[i:j + 1])
+
+    # Sort the layer blocks by length (shortest first) and then by last index (largest last index first)
+    # This way we train from the back and start with small layer blocks
+    layer_block_indices.sort(key=lambda x: (len(x), -x[-1]))
+
+    # Add a copy of each layer block with the dense layer added
+    for i in range(len(layer_block_indices)):
+        layer_block_indices.append(layer_block_indices[i] + [dense_index])
+
+    # Add dense layer only as well
+    layer_block_indices.insert(0, [dense_index])
+
+    return layer_block_indices

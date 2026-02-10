@@ -1,5 +1,4 @@
 import glob
-from pathlib import Path
 import logging
 from pathlib import Path
 from typing import List
@@ -7,13 +6,14 @@ from typing import List
 import coloredlogs
 import matplotlib.pyplot as plt
 import numpy as np
+import slab
 import tensorflow as tf
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
 from blcnn.generate_cochleagrams import compress_and_downsample
-from blcnn.util import CNNpos_to_loc, loc_to_CNNpos, get_unique_folder_name
-from persistent_cache import persistent_cache
+from blcnn.util import CNNpos_to_loc, loc_to_CNNpos, single_example_parser
+from pycochleagram.cochleagram import invert_cochleagram
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -31,15 +31,16 @@ coloredlogs.install(level='DEBUG', logger=logger, fmt='%(asctime)s - %(name)s - 
 
 
 def main() -> None:
-    # inspect_data(Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"))
-    # transform_francl_data(Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/testset_record_subset"))
-    # split_tfrecord(Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"), split_ratio=0.8)
-    # compare_datasets(Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"),
-    #                  Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/francl_data_transformed_concatenated/test_cochleagrams.tfrecord"),
+    # inspect_data(Path("data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"))
+    # transform_francl_data(Path("data/cochleagrams/testset_record_subset"))
+    # split_tfrecord(Path("data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"), split_ratio=0.8)
+    # compare_datasets(Path("data/cochleagrams/naturalsounds165_hrtf_nh2/train_cochleagrams.tfrecord"),
+    #                  Path("data/cochleagrams/francl_data_transformed_concatenated/test_cochleagrams.tfrecord"),
     #                  plot=True)
-    compare_datasets(Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/naturalsounds165_hrtf_nh2_15/train_cochleagrams.tfrecord"),
-                     Path("/Users/david/Repositories/ma/BinauralLocalizationCNN/data/cochleagrams/francl_data_transformed_concatenated/test_cochleagrams.tfrecord"),
+    compare_datasets(Path("data/cochleagrams/naturalsounds165_hrtf_nh2_15/train_cochleagrams.tfrecord"),
+                     Path("cochleagrams/francl_data_transformed_concatenated/test_cochleagrams.tfrecord"),
                      plot=True)
+
 
 def compare_datasets(path1: Path, path2: Path, plot: bool = True):
     # Load datasets
@@ -100,7 +101,6 @@ def compare_datasets(path1: Path, path2: Path, plot: bool = True):
     print('---')
     for i in range(5):
         print(f'Dataset 2 - Cochleagram {i+1}: Min: {stats2[i][0]:.3f}, Max: {stats2[i][1]:.3f}, Avg: {stats2[i][2]:.3f}, RMS: {stats2[i][3]:.3f}')
-
 
 
 def inspect_data(path: Path):
@@ -283,7 +283,11 @@ def split_tfrecord(path: Path, split_ratio: float = 0.8) -> (Path, Path):
     test_writer.close()
 
 
-
+def combine_tfrecords(tfrecord_paths: List[Path], output_path: Path) -> None:
+    with tf.io.TFRecordWriter(output_path.as_posix(), options="GZIP") as writer:
+        for tfrecord_path in tfrecord_paths:
+            for record in tqdm(tf.data.TFRecordDataset(tfrecord_path.as_posix(), compression_type="GZIP"), unit='records', desc=f'Processing {tfrecord_path.name}'):
+                writer.write(record.numpy())
 
 
 def print_pprint(*args, **kwargs):
@@ -526,3 +530,45 @@ def generate_pprint(obj, level_indent="  ", max_depth=None, verbose_output=True,
 
 if __name__ == "__main__":
     main()
+
+
+def compute_mean_cochleagram_rms(path_to_cochleagrams):
+    """
+    Usage:
+        for path in Path('data/cochleagrams/').rglob('*.tfrecord'):
+        rms = compute_mean_cochleagram_rms(path)
+        print(f'Path: {path}, Mean RMS: {rms[0]:.3f}, Std RMS: {rms[1]:.3f}')
+    """
+
+    dataset = (
+        tf.data.TFRecordDataset(path_to_cochleagrams, compression_type="GZIP")
+        .map(lambda serialized_example: single_example_parser(serialized_example))
+        .take(100)
+    )
+    rms_values = []
+    for cochleagram, _ in dataset:
+        cochleagram_np = cochleagram.numpy()
+        rms = np.sqrt(np.mean(cochleagram_np**2))
+        rms_values.append(rms)
+
+    mean_rms = np.mean(rms_values)
+    std_rms = np.std(rms_values)
+    return mean_rms, std_rms
+
+
+def play_inverted_cochleagrams(path_to_cochleagrams):
+    dataset = (
+        tf.data.TFRecordDataset(path_to_cochleagrams / 'test_cochleagrams.tfrecord', compression_type="GZIP")
+        .map(lambda serialized_example: single_example_parser(serialized_example))
+        .shuffle(512)
+        .take(10)
+    )
+
+    for coch in dataset:
+        print(coch[0][:, :, 0].shape)
+        inv_signal_l, inv_coch_l = invert_cochleagram(np.array(coch[0])[:, :, 0], 48000, 37, 30, 20000, 1, 0, n_iter=10,
+                                                      strict=False)
+        inv_signal_r, inv_coch_r = invert_cochleagram(np.array(coch[0])[:, :, 1], 48000, 37, 30, 20000, 1, 0, n_iter=10,
+                                                      strict=False)
+        inv_signal = np.stack([inv_signal_l, inv_signal_r], axis=1)
+        slab.Binaural(inv_signal).play()

@@ -16,7 +16,7 @@ import coloredlogs
 import slab
 from tqdm import tqdm
 
-from persistent_cache import persistent_cache
+from blcnn.util import persistent_cache
 from util import get_unique_folder_name, load_config, BRIRConfig, RoomConfig, SourcePositionsConfig
 
 logger = logging.getLogger(__name__)

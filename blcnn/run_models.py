@@ -1,3 +1,4 @@
+import os
 import csv
 import datetime
 import glob
@@ -14,8 +15,7 @@ import tensorflow as tf
 from tqdm import tqdm
 
 from util import get_unique_folder_name, load_config, RunModelsConfig
-from net_builder import single_example_parser
-from mem_usage import get_model_memory_usage
+from blcnn.util import single_example_parser, get_model_memory_usage
 
 logger = tf.get_logger()
 logger.setLevel(logging.INFO)
@@ -27,25 +27,28 @@ def main() -> None:
     Loads config, disables GPU if needed, and runs the testing for each HRTF label.
     """
     # Disable GPU if needed
-    logger.info(f'Physical devices: {tf.config.list_physical_devices()}')
+    # Note: TF Metal (Apple Silicon) does not guarantee deterministic inference on GPU
     only_cpu = False
     if only_cpu:
         tf.config.set_visible_devices([], 'GPU')
+
+    logger.info(f'Physical devices: {tf.config.list_physical_devices()}')
+    if only_cpu:
         logger.info('Removing GPU devices to force CPU usage')
     logger.info(f'Visible devices: {tf.config.get_visible_devices()}')
 
     # Load config
-    eval_config = load_config('blcnn/config.yml').run_models
-    logger.info(f'Loaded config: {eval_config}')
+    inference_config = load_config('blcnn/config.yml').run_models
+    logger.info(f'Loaded config: {inference_config}')
 
-    test_models_folder(eval_config)
-    # for label in eval_config.labels:
-    #     test_multiple_models(label, eval_config)
+    infer_models_folder(inference_config)
+    # for label in inference_config.labels:
+    #     infer_multiple_models(label, inference_config)
 
 
-def test_models_folder(run_models_config: RunModelsConfig) -> None:
+def infer_models_folder(run_models_config: RunModelsConfig) -> None:
     """
-    Run the testing for all (ngram) models in the given folder.
+    Run the testing for all models in the given folder.
     For now, only uses the first model in the config, but can be extended to use all models.
     """
     start_time = time.time()
@@ -59,7 +62,7 @@ def test_models_folder(run_models_config: RunModelsConfig) -> None:
 
     for model_path in path_to_models.glob('*.keras'):
         logger.info(f'Testing model: {model_path}')
-        test_single_model(model_path, path_to_cochleagrams, dest)
+        infer_single_model(model_path, path_to_cochleagrams, dest)
 
     elapsed_time = str(datetime.timedelta(seconds=time.time() - start_time))
     summary = summarize_testing(run_models_config, path_to_cochleagrams, timestamp, elapsed_time, dest)
@@ -68,7 +71,7 @@ def test_models_folder(run_models_config: RunModelsConfig) -> None:
         f.write(summary)
 
 
-def test_multiple_models(label: str, run_models_config: RunModelsConfig) -> None:
+def infer_multiple_models(label: str, run_models_config: RunModelsConfig) -> None:
     """
     Run the testing for one HRTF label using the models specified in the config.
     """
@@ -83,7 +86,7 @@ def test_multiple_models(label: str, run_models_config: RunModelsConfig) -> None
 
     for model_id in run_models_config.models_to_use:
         model_path = path_to_models / f'net{model_id}.keras'
-        test_single_model(model_path, path_to_cochleagrams, dest)
+        infer_single_model(model_path, path_to_cochleagrams, dest)
 
     elapsed_time = str(datetime.timedelta(seconds=time.time() - start_time))
     summary = summarize_testing(run_models_config, path_to_cochleagrams, timestamp, elapsed_time, dest)
@@ -92,7 +95,7 @@ def test_multiple_models(label: str, run_models_config: RunModelsConfig) -> None
         f.write(summary)
 
 
-def test_single_model(model_path: Path = None, path_to_cochleagrams: Path = None, dest: Path = None):
+def infer_single_model(model_path: Path = None, path_to_cochleagrams: Path = None, dest: Path = None):
     """
     Test a single model with the given cochleagrams and save the results to a CSV file.
     """
@@ -127,25 +130,19 @@ def test_single_model(model_path: Path = None, path_to_cochleagrams: Path = None
     # Predict
     true_classes = []
     pred_classes = []
-    # stim_names = []
 
     for predictions, labels in tqdm(predict_with_ground_truth(model, dataset), total=nr_examples/16, unit='batches'):
-    # for predictions, labels, names in tqdm(predict_with_ground_truth(model, dataset), unit='batches'):
         true_classes.append(labels.numpy())
         pred_classes.append(predictions.numpy())
         # stim_names.append(names.numpy())
 
     true_classes = np.concatenate(true_classes, axis=0)
     pred_classes = np.concatenate(pred_classes, axis=0).argmax(axis=1)
-    # stim_names = np.concatenate(stim_names, axis=0)
-    # stim_names = [name.decode('utf-8') for name in stim_names]
 
     # write to CSV
     with open(dest / f'{model_path.name.split(".")[0]}.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        # writer.writerow(['true_class', 'pred_class', 'stim_name'])
         writer.writerow(['true_class', 'pred_class'])
-        # writer.writerows(zip(true_classes, pred_classes, stim_names))
         writer.writerows(zip(true_classes, pred_classes))
 
 
@@ -181,7 +178,6 @@ def predict_with_ground_truth(model, dataset):
     """
     for batch in dataset:
         inputs, labels = batch  # Extract inputs and labels from the dataset
-        # inputs, labels, names = batch  # Extract inputs and labels from the dataset
         predictions = model(inputs, training=False)  # Perform inference
         yield predictions, labels
 

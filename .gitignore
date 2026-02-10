@@ -7,6 +7,8 @@ data/output/**
 data/cochleagrams/**
 data/raw/**
 data/_misc/
+data/output_experiment_alpha
+data/tuning_results/
 
 models/**
 !data/raw/README_raw_data.md
@@ -267,3 +269,16 @@ fabric.properties
 /logfiles/
 /legacy/MSL/msl_templare_mcdermott.py
 /legacy/MSL/tf_record_CNN_spherical_gradcheckpoint_valid_pad_multi_source_fc_finetune.py
+
+
+# VSCODE #
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+!*.code-workspace
+
+# Built Visual Studio Code Extensions
+*.vsix

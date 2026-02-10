@@ -23,5 +23,6 @@ dependencies:
     - netcdf4
     - pip:
         - visualkeras
+        - keras-tuner
         - slab
         - nnresample

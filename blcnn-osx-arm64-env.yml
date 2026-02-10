@@ -32,5 +32,6 @@ dependencies:
     - pip:
         - tensorflow-metal==1.1.0
         - visualkeras
+        - keras-tuner
         - slab
         - nnresample  # Probably remove later

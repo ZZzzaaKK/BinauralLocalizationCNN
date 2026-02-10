@@ -1,7 +1,6 @@
 import datetime
 import glob
 import itertools
-import json
 import logging
 import os
 import pprint
@@ -11,28 +10,34 @@ import time
 import traceback
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Generator, Tuple
 from time import strftime
+from typing import List, Dict, Generator, Tuple
 
 import coloredlogs
 import numpy as np
 import scipy
 import scipy as sp
 import slab
+import tensorflow as tf
+from nnresample import resample
 from slab import Filter
 from tqdm import tqdm
-import tensorflow as tf
+
+from pycochleagram import cochleagram as cgm, utils as utl
 
 # Add 'blcnn' to the Python path
 blcnn_path = os.path.abspath('./blcnn')
 if blcnn_path not in sys.path:
     sys.path.append(blcnn_path)
 
-from util import get_unique_folder_name, load_config, CochleagramConfig, Config, SourcePositionsConfig, loc_to_CNNpos
-from legacy_util import cochleagram_wrapper
+# Add 'pycochleagram' to the Python path
+pycochleagram_path = os.path.abspath('./pycochleagram')
+if pycochleagram_path not in sys.path:
+    sys.path.append(pycochleagram_path)
+
+from util import get_unique_folder_name, load_config, CochleagramConfig, Config, loc_to_CNNpos
 from generate_brirs import TrainingCoordinates, run_brir_sim, RoomConfig, calculate_listener_positions, \
     CartesianCoordinates, generate_source_positions, SphericalCoordinates
-from legacy_util import zero_padding, normalize_binaural_stim
 
 # Needed bc there's a bug in slab.Signal's add method that doesn't preserve the samplerate
 slab.Signal.set_default_samplerate(48000)
@@ -42,6 +47,7 @@ logger.setLevel(logging.INFO)
 coloredlogs.install(level='DEBUG', logger=logger, fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 rms_for_debugging = []  # To collect RMS values of spatialized sounds for debugging
+
 
 def main():
     generate_and_persist_cochleagrams_for_multiple_HRTFs()
@@ -154,7 +160,8 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
         train_writer.close()
         test_writer.close()
 
-        logger.info(f'RMS mean / stdv of spatialized sounds before normalization: {np.mean(rms_for_debugging)} / {np.std(rms_for_debugging)}')
+        logger.info(
+            f'RMS mean / stdv of spatialized sounds before normalization: {np.mean(rms_for_debugging)} / {np.std(rms_for_debugging)}')
 
         elapsed_time = str(datetime.timedelta(seconds=time.time() - start_time))
         summary = summarize_cochleagram_generation_info(cochleagram_config, hrtf_label, timestamp, elapsed_time, dest,
@@ -232,7 +239,8 @@ def generate_training_samples_from_stim_path(config: Config,
     for spatialized_sound, training_coordinates in tqdm(stim_generator, desc='Generated training samples', position=1,
                                                         unit='samples', leave=False):
         # normalized_sound = spatialized_sound * (0.1 / np.max(np.abs(spatialized_sound.data)))  # Normalize to 0.1 peak
-        normalized_sound = spatialized_sound * (0.1 / np.sqrt(np.mean(spatialized_sound.data**2)))  # Normalize to 0.1 RMS
+        normalized_sound = spatialized_sound * (
+                0.1 / np.sqrt(np.mean(spatialized_sound.data ** 2)))  # Normalize to 0.1 RMS
         if no_bkgd:
             training_samples.append((transform_stim_to_cochleagram(normalized_sound), training_coordinates))
         else:
@@ -303,14 +311,14 @@ def write_tfrecord(cochleagram, training_coords, stim_file_name: str, writer):
 
     data = {
         'train/image': tf.train.Feature(
-            bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(cochleagram.tobytes())])),  #TF2.14
+            bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(cochleagram.tobytes())])),  # TF2.14
         # 'image': tf.train.Feature(
         #     bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(cochleagram.tobytes())])),  #TF2.16
         # 'train/image_height': tf.train.Feature(int64_list=tf.train.Int64List(value=[cochleagram.shape[0]])),
         # 'train/image_width': tf.train.Feature(int64_list=tf.train.Int64List(value=[cochleagram.shape[1]])),
         # 'train/azim': tf.train.Feature(int64_list=tf.train.Int64List(value=[training_coords.source_position.azim])),
         # 'train/elev': tf.train.Feature(int64_list=tf.train.Int64List(value=[training_coords.source_position.elev])),
-        'train/target': tf.train.Feature(int64_list=tf.train.Int64List(value=[target])),  #TF2.14
+        'train/target': tf.train.Feature(int64_list=tf.train.Int64List(value=[target])),  # TF2.14
         # 'target': tf.train.Feature(int64_list=tf.train.Int64List(value=[target])),  #TF2.16
         # 'train/name': tf.train.Feature(bytes_list=tf.train.BytesList(value=[stim_file_name.encode('utf-8')]))
     }
@@ -349,11 +357,10 @@ def write_tfrecord(cochleagram, training_coords, stim_file_name: str, writer):
 #     return augmented_sounds
 
 
-
 def augment_raw_sound(
-    sound: slab.Sound,
-    lowest_center_freq=100,
-    nr_octaves=8
+        sound: slab.Sound,
+        lowest_center_freq=100,
+        nr_octaves=8
 ) -> List[slab.Sound]:
     """
     Augment a slab.Sound by applying true 2nd-order Butterworth bandpass filters.
@@ -396,7 +403,6 @@ def augment_raw_sound(
     return augmented_sounds
 
 
-
 def generate_spatialized_sound(sounds: List[slab.Sound],
                                room_configs: List[RoomConfig],
                                source_positions: List[SphericalCoordinates],
@@ -422,7 +428,7 @@ def generate_spatialized_sound(sounds: List[slab.Sound],
                                            path_to_brirs=path_to_brirs)
             # Print RMS of spatialized sound for debugging
             if spatialized_sound is not None:
-                rms = np.sqrt(np.mean(spatialized_sound.data**2))
+                rms = np.sqrt(np.mean(spatialized_sound.data ** 2))
                 rms_for_debugging.append(rms)
             # PBAR.update(1)
             # Normalize sound to 0.1 RMS
@@ -646,7 +652,6 @@ def compress_and_downsample(signal):
     return downsampled_signal
 
 
-
 """
 - Probably using TF because 2d conv is faster than filtering all cochleagram channels separately
 -> Ideally profile TF 2d conv vs. nnresample vs. scipy.signal.resample vs. scipy.signal.fftconvolve
@@ -739,6 +744,168 @@ ncalls  tottime  percall  cumtime  percall filename:lineno(function)
 397402    4.342    0.000    4.342    0.000 {built-in method numpy.array}
 
 """
+
+
+def cochleagram_wrapper(stim: np.ndarray, sig_samplerate=48000,
+                        coch_gen_sig_cutoff=2, coch_freq_lims=(30, 20000),
+                        minimum_padding=0.35, final_stim_length=1,
+                        hanning_windowed=True, sliced=True, dual_channel=True):
+    """
+    pass the stimulus, stim through the cochleagram
+    Args:
+        stim: N-by-2 np array
+        sig_samplerate: stimulus sampling rate
+        coch_gen_sig_cutoff: maximum length of the stimulus to be used, second
+        coch_freq_lims: 2 elements tuple/list/array, low and high limits of cochlea frequency
+        minimum_padding: starting parts of the stimulus to be ignored, second
+        final_stim_length: duration of the result, second
+        hanning_windowed: if a hanning window is to be used to window the stimulus
+        sliced: if pick a random `final_stim_length` duration portion of the stimulus
+        dual_channel: if the L/R channels in the resulting cochleagram should be stacked.
+            if stacked, the result will be 36-N-2, otherwise 72-N
+
+    Returns:
+        resulting cochleagram, np array
+    """
+    # time to n samples conversion
+    final_stim_length_n = round(final_stim_length * sig_samplerate)
+    minimum_padding_n = round(minimum_padding * sig_samplerate)
+    coch_gen_sig_cutoff_n = round(coch_gen_sig_cutoff * sig_samplerate)
+
+    stim_freq = sig_samplerate
+
+    # Trim signal
+    stim = stim[:, :coch_gen_sig_cutoff_n]
+    # delay = 15000
+    # first dimension due to transpose
+    sig_length_in_samples = stim.shape[1]
+    # sample_factor is a Positive integer that determines how densely ERB function will be sampled to
+    # create bandpass filters. see pycochleagram for more details
+    sample_factor = 1
+
+    # Apply a hanning window to the stimulus
+    if hanning_windowed:
+        r_channel = apply_hanning_window(stim[1], 20, sample_rate=44100)
+        l_channel = apply_hanning_window(stim[0], 20, sample_rate=44100)
+    else:
+        r_channel = stim[1]
+        l_channel = stim[0]
+
+    # calculate subbands
+    # -> Calls the cochleagram function from pycochleagram, don't inspect for now, but profile
+    # Apparently can be run in batched mode, batch dimension is the first dimension -> Otherwise creates redundant filters
+    # Maybe a @lru_cache decorator can be used to cache the filters?
+    # -> Returns np.array of shape (num_channels, num_samples)
+    subbands_r = cgm.human_cochleagram(r_channel, stim_freq, low_lim=coch_freq_lims[0], hi_lim=coch_freq_lims[1],
+                                       sample_factor=sample_factor, padding_size=10000,
+                                       ret_mode='subband').astype(np.float32)
+    subbands_l = cgm.human_cochleagram(l_channel, stim_freq, low_lim=coch_freq_lims[0], hi_lim=coch_freq_lims[1],
+                                       sample_factor=sample_factor, padding_size=10000,
+                                       ret_mode='subband').astype(np.float32)
+
+    if sliced:
+        front_limit = minimum_padding_n
+        back_limit = sig_length_in_samples - minimum_padding_n - final_stim_length_n
+        jitter = np.random.randint(round(front_limit), round(back_limit))
+        front_slice = jitter
+        back_slice = jitter + final_stim_length_n
+        # 44100*300ms = 13000
+        subbands_l = subbands_l[:, front_slice:back_slice]
+        subbands_r = subbands_r[:, front_slice:back_slice]
+
+    if dual_channel:
+        num_channels = subbands_l.shape[0] - 2 * sample_factor
+        subbands = np.empty([num_channels, final_stim_length_n, 2], dtype=subbands_l.dtype)
+        # not taking first and last filters because we don't want the low and
+        # highpass filters
+        subbands[:, :, 0] = subbands_l[sample_factor:-sample_factor]
+        subbands[:, :, 1] = subbands_r[sample_factor:-sample_factor]
+    else:
+        # Interleaving subbands,so local filters can access both channels
+        num_channels = subbands_l.shape[0] - 2 * sample_factor
+        subbands = np.empty([(2 * num_channels), final_stim_length_n], dtype=subbands_l.dtype)
+        subbands[0::2] = subbands_l[sample_factor:-sample_factor]
+        subbands[1::2] = subbands_r[sample_factor:-sample_factor]
+
+    # Cut anything -60 dB below peak
+    max_val = subbands.max() if subbands.max() > abs(subbands.min()) else abs(subbands.min())
+    cutoff = max_val / 1000
+    subbands[np.abs(subbands) < cutoff] = 0
+    # text input as bytes so bytes objects necessary for comparison
+    return subbands
+
+
+def apply_hanning_window(stim, ramp_duration_ms, sample_rate=48000):
+    """
+    Apply hanning window to the stimulus
+    Args:
+        stim:
+        ramp_duration_ms:
+        sample_rate:
+
+    Returns:
+    """
+
+    stim_np = np.array(stim)
+    stim_dur_smp = stim_np.shape[0]
+    ramp_dur_smp = int(np.floor(ramp_duration_ms * sample_rate / 1000))
+    hanning_window = np.hanning(ramp_dur_smp * 2)
+    onset_win = stim_np[:ramp_dur_smp] * hanning_window[:ramp_dur_smp]
+    middle = stim_np[ramp_dur_smp:stim_dur_smp - ramp_dur_smp]
+    end_win = stim_np[stim_dur_smp - ramp_dur_smp:] * hanning_window[ramp_dur_smp:]
+    windowed_stim = np.concatenate((onset_win, middle, end_win))
+    return windowed_stim
+
+
+def zero_padding(stim, type="front", goal_duration=2.1):
+    if not isinstance(stim, slab.Sound):
+        raise ValueError("stimulus must be instance of slab.Sound!")
+    if stim.duration > 2.0:
+        stim = stim.trim(0.0, 2.0)
+    curr_n_samples = stim.n_samples
+    if type == "frontback":
+        missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples) / 2)
+        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        return slab.Sound.sequence(padding, stim, padding)
+    elif type == "front":
+        missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples))
+        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        return slab.Sound.sequence(padding, stim)
+    elif type == "back":
+        missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples))
+        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        return slab.Sound.sequence(stim, padding)
+
+
+def normalize_binaural_stim(orig_stim: np.ndarray, orig_sr, target_sr=48000, scaling_max=0.1, min_len=2):
+    """
+    read binaural sound from wavefile and prepare it for feeding into cochleagram wrapper
+    Args:
+        orig_stim: N-by-2 np array, binaural sound
+        orig_sr: int, original sampling rate
+        target_sr: int, resulting sampling frequency
+        scaling_max: float, maximum value of resulting stim
+        min_len: float, minimum length of the stimulus, second
+
+    Returns:
+        standardized binaural stim, as well as sampling frequency of the stim
+    """
+    assert orig_stim.shape[1] == 2, 'a binaural stimulus with shape N-by-2 is needed'
+    assert orig_stim.shape[0] >= orig_sr * min_len, 'the stimulus must have at least {} ' \
+                                                    'seconds duration'.format(min_len)
+    stim_wav = scaling_max * utl.rescale_sound(orig_stim, 'normalize')
+    stim_wav = stim_wav.T
+    if orig_sr != target_sr:
+        # stim_wav_empty = np.empty_like(stim_wav)
+        # print("resampling")
+        stim_wav_l = resample(stim_wav[0], target_sr, orig_sr, As=75, N=64001)
+        stim_wav_r = resample(stim_wav[1], target_sr, orig_sr, As=75, N=64001)
+        stim_freq = target_sr
+        stim_wav = np.vstack([stim_wav_l, stim_wav_r])
+    else:
+        stim_freq = orig_sr
+    return stim_wav, stim_freq
+
 
 if __name__ == "__main__":
     main()
