@@ -67,5 +67,3 @@ This script generates plots and visualizations from the model predictions.
 # Links
 - 2-sec sounds: https://mcdermottlab.mit.edu/svnh/Natural-Sound/Stimuli.html (currently using different stim set)
 - 7-textures, find under https://mcdermottlab.mit.edu/downloads.html
-
-

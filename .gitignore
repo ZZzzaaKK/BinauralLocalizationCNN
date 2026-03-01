@@ -4,6 +4,7 @@
 data/hrtfs/**
 data/brirs/**
 data/output/**
+!data/output/regression*
 data/cochleagrams/**
 data/raw/**
 data/_misc/
@@ -11,6 +12,9 @@ data/output_experiment_alpha
 data/tuning_results/
 
 models/**
+!models/regression/
+!models/regression/2026-03-01_14-52-51/
+!models/regression/2026-03-01_14-52-51/**
 !data/raw/README_raw_data.md
 .DS_Store
 cache/

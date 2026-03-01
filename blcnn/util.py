@@ -1,7 +1,7 @@
 import functools
 import json
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
 
 import tensorflow as tf
@@ -76,7 +76,7 @@ class PlottingConfig:
 class Config:
     generate_brirs: BRIRConfig
     generate_cochleagrams: CochleagramConfig
-    freeze_training: FreezeTrainingConfig
+    # freeze_training: FreezeTrainingConfig
     run_models: RunModelsConfig
     plotting: PlottingConfig
 
@@ -90,60 +90,71 @@ def load_config(file_path: str) -> Config:
     Returns:
         The configuration data class.
     """
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         raw_config = yaml.safe_load(f)
 
     # Map the nested YAML dictionary to the data classes
     return Config(
         generate_brirs=BRIRConfig(
-            hrtfs=raw_config['generate_brirs']['hrtfs'],
+            hrtfs=raw_config["generate_brirs"]["hrtfs"],
             source_positions=SourcePositionsConfig(
-                azimuths=raw_config['generate_brirs']['source_positions']['azimuths'],
-                elevations=raw_config['generate_brirs']['source_positions']['elevations']
+                azimuths=raw_config["generate_brirs"]["source_positions"]["azimuths"],
+                elevations=raw_config["generate_brirs"]["source_positions"][
+                    "elevations"
+                ],
             ),
             room_configs=[
                 RoomConfig(
-                    id=room['id'],
-                    width=room['width'],
-                    length=room['length'],
-                    height=room['height']
-                ) for room in raw_config['generate_brirs']['room_configs']
+                    id=room["id"],
+                    width=room["width"],
+                    length=room["length"],
+                    height=room["height"],
+                )
+                for room in raw_config["generate_brirs"]["room_configs"]
             ],
-            persist_brirs_individually=raw_config['generate_brirs']['persist_brirs_individually']
+            persist_brirs_individually=raw_config["generate_brirs"][
+                "persist_brirs_individually"
+            ],
         ),
         generate_cochleagrams=CochleagramConfig(
-            hrtf_labels=raw_config['generate_cochleagrams']['hrtf_labels'],
-            stim_paths=raw_config['generate_cochleagrams']['stim_paths'],
+            hrtf_labels=raw_config["generate_cochleagrams"]["hrtf_labels"],
+            stim_paths=raw_config["generate_cochleagrams"]["stim_paths"],
             source_positions=SourcePositionsConfig(
-                azimuths=raw_config['generate_cochleagrams']['source_positions']['azimuths'],
-                elevations=raw_config['generate_cochleagrams']['source_positions']['elevations']
+                azimuths=raw_config["generate_cochleagrams"]["source_positions"][
+                    "azimuths"
+                ],
+                elevations=raw_config["generate_cochleagrams"]["source_positions"][
+                    "elevations"
+                ],
             ),
-            bkgd_path=raw_config['generate_cochleagrams']['bkgd_path'],
-            use_bkgd=raw_config['generate_cochleagrams']['use_bkgd'],
-            anechoic=raw_config['generate_cochleagrams']['anechoic'],
-            train_test_split=raw_config['generate_cochleagrams']['train_test_split'],
-            generation_base_probability= raw_config['generate_cochleagrams']['generation_base_probability']
+            bkgd_path=raw_config["generate_cochleagrams"]["bkgd_path"],
+            use_bkgd=raw_config["generate_cochleagrams"]["use_bkgd"],
+            anechoic=raw_config["generate_cochleagrams"]["anechoic"],
+            train_test_split=raw_config["generate_cochleagrams"]["train_test_split"],
+            generation_base_probability=raw_config["generate_cochleagrams"][
+                "generation_base_probability"
+            ],
         ),
-        freeze_training=FreezeTrainingConfig(
-            labels=raw_config['freeze_training']['labels'],
-            models_to_use=raw_config['freeze_training']['models_to_use'],
-            layer_block_lengths=raw_config['freeze_training']['layer_block_lengths']
-        ),
+        # freeze_training=FreezeTrainingConfig(
+        #     labels=raw_config['freeze_training']['labels'],
+        #     models_to_use=raw_config['freeze_training']['models_to_use'],
+        #     layer_block_lengths=raw_config['freeze_training']['layer_block_lengths']
+        # ),
         run_models=RunModelsConfig(
-            folder=raw_config['run_models']['folder'],
-            labels=raw_config['run_models']['labels'],
-            models_to_use=raw_config['run_models']['models_to_use']
+            folder=raw_config["run_models"]["folder"],
+            labels=raw_config["run_models"]["labels"],
+            models_to_use=raw_config["run_models"]["models_to_use"],
         ),
         plotting=PlottingConfig(
-            labels=raw_config['plotting']['labels'],
-            data_selection=raw_config['plotting']['data_selection'],
-            folded=raw_config['plotting']['folded'],
-            binned=raw_config['plotting']['binned'],
-            nr_elevation_bins=raw_config['plotting']['nr_elevation_bins'],
-            nr_azimuth_bins=raw_config['plotting']['nr_azimuth_bins'],
-            show_single_responses=raw_config['plotting']['show_single_responses'],
-            style=raw_config['plotting']['style']
-        )
+            labels=raw_config["plotting"]["labels"],
+            data_selection=raw_config["plotting"]["data_selection"],
+            folded=raw_config["plotting"]["folded"],
+            binned=raw_config["plotting"]["binned"],
+            nr_elevation_bins=raw_config["plotting"]["nr_elevation_bins"],
+            nr_azimuth_bins=raw_config["plotting"]["nr_azimuth_bins"],
+            show_single_responses=raw_config["plotting"]["show_single_responses"],
+            style=raw_config["plotting"]["style"],
+        ),
     )
 
 
@@ -178,6 +189,7 @@ def CNNpos_to_loc(CNN_pos):
     elev = div * 10
     return azim, elev
 
+
 def loc_to_CNNpos(azim, elev):
     """
     convert [azim, elev] positions into bin label in the CNN from Francl 2022
@@ -207,18 +219,19 @@ def single_example_parser(example):
     """
 
     feature_description = {
-        'train/image': tf.io.FixedLenFeature([], tf.string),  # use with TF2.14
-        'train/target': tf.io.FixedLenFeature([], tf.int64)  # use with TF2.14
-
+        "train/image": tf.io.FixedLenFeature([], tf.string),  # use with TF2.14
+        "train/target": tf.io.FixedLenFeature([], tf.int64),  # use with TF2.14
         # 'image': tf.io.FixedLenFeature([], tf.string),  # use with TF2.16
         # 'target': tf.io.FixedLenFeature([], tf.int64)  # use with TF2.16
-        }
+    }
     example = tf.io.parse_single_example(example, feature_description)
 
-    example['train/image'] = tf.reshape(tf.io.decode_raw(example['train/image'], tf.float32), (39, 8000, 2))  # use with TF2.14
+    example["train/image"] = tf.reshape(
+        tf.io.decode_raw(example["train/image"], tf.float32), (39, 8000, 2)
+    )  # use with TF2.14
     # example['image'] = tf.reshape(tf.io.decode_raw(example['image'], tf.float32), (39, 8000, 2))  # use with TF2.16
 
-    return example['train/image'], example['train/target'] # use with TF2.14
+    return example["train/image"], example["train/target"]  # use with TF2.14
     # return example['image'], example['target']  # use with TF2.16
 
 
@@ -228,10 +241,10 @@ def persistent_cache(func):
     Creates a "cache/" directory if it does not exist and writes the
     caches of the given func to the file "cache/<func-name>.cache"
     """
-    file_path = Path(f'cache/{func.__name__}.cache')
+    file_path = Path(f"cache/{func.__name__}.cache")
     file_path.parent.mkdir(exist_ok=True)
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             cache = json.load(f)
     except (IOError, ValueError):
         cache = {}
@@ -239,17 +252,19 @@ def persistent_cache(func):
     @functools.wraps(func)
     def wrapper(*args, persistent_cache_key=None, **kwargs):
         """
-            :param persistent_cache_key: The key to use for the cache. If None, the arguments of the function are used.
+        :param persistent_cache_key: The key to use for the cache. If None, the arguments of the function are used.
         """
         if persistent_cache_key:
             persistent_cache_key = str(persistent_cache_key)
         else:
-            assert args or kwargs, f'Cannot create key without arguments or explicit key. Use persistent_cache_key=<key> or provide other arguments to {func.__name__}()'
+            assert args or kwargs, (
+                f"Cannot create key without arguments or explicit key. Use persistent_cache_key=<key> or provide other arguments to {func.__name__}()"
+            )
             persistent_cache_key = str(args) + str(kwargs)
 
         if persistent_cache_key not in cache:
             cache[persistent_cache_key] = func(*args, **kwargs)
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 json.dump(cache, f)
         return cache[persistent_cache_key]
 
@@ -261,6 +276,7 @@ def get_model_memory_usage(batch_size, model):
     Usage: print(get_model_memory_usage(16, create_model(Path('../models/net_weights/net1'))))
     """
     import numpy as np
+
     try:
         from keras import backend as K
     except:
@@ -270,7 +286,7 @@ def get_model_memory_usage(batch_size, model):
     internal_model_mem_count = 0
     for l in model.layers:
         layer_type = l.__class__.__name__
-        if layer_type == 'Model':
+        if layer_type == "Model":
             internal_model_mem_count += get_model_memory_usage(batch_size, l)
         single_layer_mem = 1
         out_shape = l.output_shape
@@ -283,38 +299,44 @@ def get_model_memory_usage(batch_size, model):
         shapes_mem_count += single_layer_mem
 
     trainable_count = np.sum([K.count_params(p) for p in model.trainable_weights])
-    non_trainable_count = np.sum([K.count_params(p) for p in model.non_trainable_weights])
+    non_trainable_count = np.sum(
+        [K.count_params(p) for p in model.non_trainable_weights]
+    )
 
     number_size = 4.0
-    if K.floatx() == 'float16':
+    if K.floatx() == "float16":
         number_size = 2.0
-    if K.floatx() == 'float64':
+    if K.floatx() == "float64":
         number_size = 8.0
 
-    total_memory = number_size * (batch_size * shapes_mem_count + trainable_count + non_trainable_count)
-    gbytes = np.round(total_memory / (1024.0 ** 3), 3) + internal_model_mem_count
+    total_memory = number_size * (
+        batch_size * shapes_mem_count + trainable_count + non_trainable_count
+    )
+    gbytes = np.round(total_memory / (1024.0**3), 3) + internal_model_mem_count
     return gbytes
 
 
-def compute_layer_block_indices(path_to_indices: Path, net_id: int, block_lengths: List[int]) -> list:
+def compute_layer_block_indices(
+    path_to_indices: Path, net_id: int, block_lengths: List[int]
+) -> list:
     """
     Take a model and return a list containing the indices of consecutive layer blocks for each conv2d layer.
     Additionally return those indices with the Dense layer added.
     """
-    with open(path_to_indices, 'r') as f:
+    with open(path_to_indices, "r") as f:
         layer_indices = eval(f.read())
-    print(f'Loaded layer indices from models/keras/layer_indices.txt: {layer_indices}')
+    print(f"Loaded layer indices from models/keras/layer_indices.txt: {layer_indices}")
 
-    conv2d_indices = layer_indices[f'net{net_id}']['conv2d']
-    dense_index = layer_indices[f'net{net_id}']['dense']
+    conv2d_indices = layer_indices[f"net{net_id}"]["conv2d"]
+    dense_index = layer_indices[f"net{net_id}"]["dense"]
 
     layer_block_indices = []
     # Get the layer block indices
     for i in range(len(conv2d_indices)):
         for j in range(len(conv2d_indices)):
-            if conv2d_indices[i:j + 1]:
+            if conv2d_indices[i : j + 1]:
                 if (j - i + 1) in block_lengths:
-                    layer_block_indices.append(conv2d_indices[i:j + 1])
+                    layer_block_indices.append(conv2d_indices[i : j + 1])
 
     # Sort the layer blocks by length (shortest first) and then by last index (largest last index first)
     # This way we train from the back and start with small layer blocks
