@@ -47,7 +47,7 @@ generate_cochleagrams:
 
 # Configuration for run_models.py
 run_models:
-  folder: keras  # Folder where the freeze trained models are stored
+  folder: keras  # Folder where the models are stored
   labels: # <stim_path>_<hrtf_label> -> Which cochleagram sets from the generate_cochleagrams.py output to use, only name without extension
 #    - slab_kemar
   models_to_use: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # Ignored at the moment
@@ -55,7 +55,7 @@ run_models:
 
 # Configuration for plotting.py
 plotting:
-  labels: # <hrtf_label>_<stim_path>  Which runs to plot
+  predictions: # <hrtf_label>_<stim_path>  Which runs to plot
 #    - slab_kemar
 #    - hrtf_nh2
     - output_experiment_alpha

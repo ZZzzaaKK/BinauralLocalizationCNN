@@ -101,10 +101,12 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
 
     options = tf.io.TFRecordOptions(tf.compat.v1.python_io.TFRecordCompressionType.GZIP)
     train_writer = tf.io.TFRecordWriter((dest / 'train_cochleagrams.tfrecord').as_posix(), options=options)
+    val_writer = tf.io.TFRecordWriter((dest / 'val_cochleagrams.tfrecord').as_posix(), options=options)
     test_writer = tf.io.TFRecordWriter((dest / 'test_cochleagrams.tfrecord').as_posix(), options=options)
     split = 0.8  # 80% train, 20% test
 
     train_samples = 0
+    val_samples = 0
     test_samples = 0
 
     global rms_for_debugging
@@ -139,8 +141,12 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
                         write_tfrecord(training_sample, training_coords, single_stim_path.name, train_writer)
                         train_samples += 1
                     else:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
-                        test_samples += 1
+                        if random.random() < 0.5:  # Split remaining 20% into val and test
+                            write_tfrecord(training_sample, training_coords, single_stim_path.name, val_writer)
+                            val_samples += 1
+                        else:
+                            write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
+                            test_samples += 1
             else:
                 for training_sample, training_coords in generate_training_samples_from_stim_path(config,
                                                                                                  single_stim_path,
@@ -149,8 +155,12 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
                         write_tfrecord(training_sample, training_coords, single_stim_path.name, train_writer)
                         train_samples += 1
                     else:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
-                        test_samples += 1
+                        if random.random() < 0.5:
+                            write_tfrecord(training_sample, training_coords, single_stim_path.name, val_writer)
+                            val_samples += 1
+                        else:
+                            write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
+                            test_samples += 1
                     # inner_bar.update(1)
         # inner_bar.close()
     except Exception as e:
@@ -165,7 +175,7 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
 
         elapsed_time = str(datetime.timedelta(seconds=time.time() - start_time))
         summary = summarize_cochleagram_generation_info(cochleagram_config, hrtf_label, timestamp, elapsed_time, dest,
-                                                        train_samples, test_samples)
+                                                        train_samples, val_samples, test_samples)
         logger.info(summary)
         with open(dest / f'_summary_{timestamp}.txt', 'w') as f:
             f.write(summary)
@@ -177,6 +187,7 @@ def summarize_cochleagram_generation_info(cochleagram_config: CochleagramConfig,
                                           elapsed_time: str,
                                           dest: Path,
                                           train_samples: int,
+                                          val_samples: int,
                                           test_samples: int) -> str:
     # Load BRIR summary
     path_to_brirs = Path(f'data/brirs/{hrtf_label}')
@@ -191,6 +202,7 @@ def summarize_cochleagram_generation_info(cochleagram_config: CochleagramConfig,
               f'Number of Stimuli found (only if a single folder is specified): {len(list(glob.glob(f"{cochleagram_config.stim_paths}/*.wav")))}\n' \
               f'Number of Backgrounds found: {len(list(glob.glob(f"{cochleagram_config.bkgd_path}/*.wav")))}\n' \
               f'Train dataset size (nr of cochleagrams): {train_samples}\n' \
+              f'Validation dataset size (nr of cochleagrams): {val_samples}\n' \
               f'Test dataset size (nr of cochleagrams): {test_samples}\n\n' \
               f'Config:\n{pprint.pformat(cochleagram_config)}\n\n' \
               f'Based on the following BRIR generation:\n' \
