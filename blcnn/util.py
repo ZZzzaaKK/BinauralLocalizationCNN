@@ -62,7 +62,7 @@ class RunModelsConfig:
 
 @dataclass
 class PlottingConfig:
-    labels: List[str]
+    predictions: List[str]
     data_selection: str
     folded: bool
     binned: bool
@@ -135,7 +135,7 @@ def load_config(file_path: str) -> Config:
             models_to_use=raw_config['run_models']['models_to_use']
         ),
         plotting=PlottingConfig(
-            labels=raw_config['plotting']['labels'],
+            predictions=raw_config['plotting']['predictions'],
             data_selection=raw_config['plotting']['data_selection'],
             folded=raw_config['plotting']['folded'],
             binned=raw_config['plotting']['binned'],

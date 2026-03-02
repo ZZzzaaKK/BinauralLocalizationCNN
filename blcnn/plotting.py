@@ -14,21 +14,21 @@ from blcnn.util import load_config
 
 def main() -> None:
     # sys.exit()
-    # Go through labels in config and create one plot for each label and net
+    # Go through labels in config and create one plot for each prediction_folder and net
 
     plotting_config = load_config('blcnn/config.yml').plotting
     if plotting_config.data_selection == 'back' and plotting_config.folded == False:
         print('Warning: Data selection is "back" but folded is False. Setting folded to True.')
         plotting_config.folded = True
 
-    for label in plotting_config.labels:
-        print(f'Plotting for HRTF: {label}')
+    for prediction_folder in plotting_config.predictions:
+        print(f'Plotting for HRTF: {prediction_folder}')
         # Load data available in the folder 'data/output/{hrtf_label}'
-        data_folder = Path(f'data/{label}')
+        data_folder = Path(f'{prediction_folder}')
         for result_file in glob.glob(str(data_folder / '*.csv')):
             print(f'Generating plot for file: {result_file}')
             data = read_single_cnn_result(Path(result_file), plotting_config.data_selection, plotting_config.folded)
-            title = f'Localization Accuracy\n{label} - {Path(result_file).stem} - {plotting_config.data_selection} data\nfolded: {plotting_config.folded}'
+            title = f'Localization Accuracy\n{prediction_folder} - {Path(result_file).stem} - {plotting_config.data_selection} data\nfolded: {plotting_config.folded}'
             print(title)
             plt = plot_localization_accuracy(data,
                                              nr_elevation_bins=plotting_config.nr_elevation_bins,
