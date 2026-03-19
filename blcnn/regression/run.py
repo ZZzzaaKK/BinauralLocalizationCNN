@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Tuple
 
 import coloredlogs
-import numpy as np
 import keras
+import numpy as np
 import tensorflow as tf
-from data_loader_regression import (
+from data_loader import (
     OutputMode,
     create_regression_example_parser,
 )
@@ -101,8 +101,9 @@ def run_inference(
         rows = np.concatenate([targets, predictions], axis=1)
     else:
         header = ["true_azim", "true_elev", "pred_azim", "pred_elev"]
-        rows = np.column_stack([targets[:, 0], targets[:, 1],
-                                predictions[:, 0], predictions[:, 1]])
+        rows = np.column_stack(
+            [targets[:, 0], targets[:, 1], predictions[:, 0], predictions[:, 1]]
+        )
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -128,11 +129,11 @@ def main():
         "--model", required=True, help="Path to trained regression model (.keras)"
     )
     parser.add_argument(
-        "--data", required=True, help="Path to preprocessed TFRecord (cochleagrams_8k.tfrecord)"
+        "--data",
+        required=True,
+        help="Path to preprocessed TFRecord (cochleagrams_8k.tfrecord)",
     )
-    parser.add_argument(
-        "--output", required=True, help="Output CSV path"
-    )
+    parser.add_argument("--output", required=True, help="Output CSV path")
     parser.add_argument(
         "--output-mode",
         default="spherical_folded",

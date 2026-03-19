@@ -16,9 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from plotting import plot_localization_accuracy
@@ -75,8 +74,13 @@ def plot_error_histograms(data: np.ndarray, output_path: Path) -> None:
     ]:
         ax.hist(err, bins=40, color=color, edgecolor="white", linewidth=0.3)
         ax.axvline(0, color="black", linewidth=1, linestyle="--")
-        ax.axvline(np.mean(err), color="red", linewidth=1, linestyle="-",
-                   label=f"Mean = {np.mean(err):.1f}°")
+        ax.axvline(
+            np.mean(err),
+            color="red",
+            linewidth=1,
+            linestyle="-",
+            label=f"Mean = {np.mean(err):.1f}°",
+        )
         ax.set_xlabel(label)
         ax.set_ylabel("Count")
         mae = np.mean(np.abs(err))
@@ -112,13 +116,14 @@ def plot_hofman(data: np.ndarray, output_path: Path) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Plot regression model predictions"
-    )
-    parser.add_argument("--csv", required=True, help="Path to regression_predictions.csv")
+    parser = argparse.ArgumentParser(description="Plot regression model predictions")
     parser.add_argument(
-        "--output-dir", default=None,
-        help="Directory for output plots (default: same folder as CSV)"
+        "--csv", required=True, help="Path to regression_predictions.csv"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory for output plots (default: same folder as CSV)",
     )
     args = parser.parse_args()
 

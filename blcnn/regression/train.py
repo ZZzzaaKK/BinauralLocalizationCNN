@@ -14,8 +14,8 @@ from pathlib import Path
 import coloredlogs
 import keras
 import tensorflow as tf
-from data_loader_regression import load_multiple_tfrecords, load_regression_dataset
-from net_builder_regression import (
+from data_loader import load_multiple_tfrecords, load_regression_dataset
+from net_builder import (
     OutputMode,
     compile_regression_model,
     create_regression_model_from_pretrained,
