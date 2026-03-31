@@ -12,7 +12,7 @@ On Linux install libsndfile and PortAudio manually as required by slab: `sudo ap
 #### Data
 Download the model weights from [here](https://www.dropbox.com/sh/af6vaotxt41i7pe/AACfTzMxMLfv-Edmn33S4gTpa?dl=0) and place the `Binaural Localization Net Weights` folder into `models/`.  
 Get your favourite HRTFs from [here](https://www.sofaconventions.org/mediawiki/index.php/Files) and place them in `data/hrtfs/`.  
-Get your favourite stimulus sounds and place the folder containing them into `data/raw/`.
+Get your favourite stimulus sounds (e.g., from [here](http://mcdermottlab.mit.edu/svnh/Natural-Sound/Stimuli.html)) and place the folder containing them into `data/raw/`.
 
 #### Transfer model weights to TF2/Keras
 The original model was trained in TF1. This project ported the models to TensorFlow 2 / Keras.
@@ -21,7 +21,6 @@ To convert the weights to TF2/Keras, run `python convert_models_to_tf2.py` after
 ## Usage
 The configuration for the scripts is managed through a YAML file (`config.yml`). This file contains various settings and parameters required for the execution of the scripts. The `util.py` file provides functions to load and parse this configuration file.
 
-The main variable that changes between runs is the HRTF that's used.
 In each step, the HRTFs to be used can be specified individually.
 For the first step (generate BRIRs), the HRTFs are specified through their path.
 In subsequent steps, the HRTFs are specified through their label, which is the name of the HRTF file without the extension.
@@ -38,18 +37,25 @@ This script generates Binaural Room Impulse Responses (BRIRs) needed to simulate
 ### `generate_cochleagrams.py`
 This script generates cochleagrams from audio stimuli using the specified HRTFs.
 - `hrtf_labels`: List of HRTF labels to use.
-- `stim_path`: Path to the directory containing the audio stimuli.
+- `stim_paths`: Path to the directories containing the audio stimuli.
+- `source_positions`: List of source positions to generate cochleagrams for; must be a subset of the positions specified above; defaults taken from McDermott's paper.
 - `bkgd_path`: Path to the directory containing background sounds (not used at the moment).
 - `use_bkgd`: Boolean to determine if background sounds should be used (set to False for now).
+- `anechoic`: Generate the cochleagrams in an anechoic environment, i.e., use HRTFs instead of BRIRs.
+- `train_test_split`: Ratio of training to test cochleagrams.
+- `generation_base_probability`: Probability of generating a cochleagram for a given source position.
 
 ### `run_models.py`
 This script runs the trained models on the generated cochleagrams to perform auditory source localization.
+- `folder`: Folder where the models are stored.
 - `hrtf_labels`: List of HRTF labels to use.
 - `models_to_use`: List of models to use for the predictions; IDs must be from 1 to 10.
 
 ### `plotting.py`
 This script generates plots and visualizations from the model predictions.
-- `hrtf_labels`: List of HRTF labels to use.
+- `predictions`: Which runs to plot; this could be the HRTF labels specified above or other runs.
+- `data_selection`: Filter the data to use only front or back hemisphere of data or all data.
+- `folded`: Whether the data should be front-back folded in the visualization.
 - `binned`: Boolean to determine if the predictions should be binned.
 - `nr_elevation_bins`: Number of bins to use for the elevation.
 - `nr_azimuth_bins`: Number of bins to use for the azimuth.
@@ -58,10 +64,6 @@ This script generates plots and visualizations from the model predictions.
 
 ### Other scripts
 - `inspect_tfrecord.py`: Helper tool to look at the insides of a TFRecord file.
-- `inv_coch.py`: Inverse cochleagram transform to hear the sounds from the cochleagrams.
-- `mem_usage.py`: Script to calculate the potential memory usage of the models.
-- `net_builder.py`: Contains the code to build the model architectures from the Tensorflow 1 config arrays, as well as the parser for the samples from the tfrecord files (... which really should be in a different file)
-- `persistent_cache.py`: A simple persistent cache decorator.
 - `util.py`: Contains utility functions, e.g., to load and parse the configuration file.
 
 # Links
