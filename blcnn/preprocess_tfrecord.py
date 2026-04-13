@@ -43,23 +43,26 @@ def process_image(image: np.ndarray, fir: np.ndarray) -> np.ndarray:
     return np.power(result, 0.3)
 
 
+def cnnpos_to_loc(target: int):
+    """
+    Invert loc_to_CNNpos: convert bin label back to (azim, elev).
+    target = (elev // 10) * 72 + (azim // 5)
+    """
+    elev = (target // 72) * 10
+    azim = (target % 72) * 5
+    return azim, elev
+
+
 FEATURES = {
-    "train/azim": tf.io.FixedLenFeature([], tf.int64),
-    "train/elev": tf.io.FixedLenFeature([], tf.int64),
     "train/image": tf.io.FixedLenFeature([], tf.string),
-    "train/image_height": tf.io.FixedLenFeature([], tf.int64),
-    "train/image_width": tf.io.FixedLenFeature([], tf.int64),
+    "train/target": tf.io.FixedLenFeature([], tf.int64),
 }
 
 
 def make_tf_example(azim: int, elev: int, image: np.ndarray) -> bytes:
     feature = {
-        "train/azim": tf.train.Feature(
-            int64_list=tf.train.Int64List(value=[azim])
-        ),
-        "train/elev": tf.train.Feature(
-            int64_list=tf.train.Int64List(value=[elev])
-        ),
+        "train/azim": tf.train.Feature(int64_list=tf.train.Int64List(value=[azim])),
+        "train/elev": tf.train.Feature(int64_list=tf.train.Int64List(value=[elev])),
         "train/image": tf.train.Feature(
             bytes_list=tf.train.BytesList(value=[image.tobytes()])
         ),
@@ -104,15 +107,12 @@ def main():
         for raw in dataset:
             example = tf.io.parse_single_example(raw, FEATURES)
             image = tf.reshape(
-                tf.io.decode_raw(example["train/image"], tf.float32), (39, 48000, 2)
+                tf.io.decode_raw(example["train/image"], tf.float32), (39, 8000, 2)
             ).numpy()
 
+            azim, elev = cnnpos_to_loc(int(example["train/target"]))
             processed = process_image(image, fir)
-            serialized = make_tf_example(
-                int(example["train/azim"]),
-                int(example["train/elev"]),
-                processed,
-            )
+            serialized = make_tf_example(azim, elev, processed)
             writer.write(serialized)
             n += 1
             if n % 100 == 0:

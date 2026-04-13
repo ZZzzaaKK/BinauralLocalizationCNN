@@ -72,7 +72,7 @@ def run_inference(
     parser = create_regression_example_parser(
         output_mode=output_mode,
         normalize_targets=True,
-        preprocessed=True,
+        preprocessed=False,
     )
     dataset = (
         tf.data.TFRecordDataset(str(data_path), compression_type="GZIP")
@@ -83,27 +83,32 @@ def run_inference(
 
     all_preds = []
     all_targets = []
+    all_names = []
 
-    for images, targets in dataset:
+    for images, targets, names in dataset:
         preds = model(images, training=False)
         all_preds.append(preds.numpy())
         all_targets.append(targets.numpy())
+        all_names.append(names.numpy().astype(str))
 
     predictions = np.concatenate(all_preds, axis=0)
     targets = np.concatenate(all_targets, axis=0)
+    names = np.concatenate(all_names, axis=0)
 
     predictions, targets = denormalize(predictions, targets, output_mode)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if output_mode == "cartesian":
-        header = ["true_x", "true_y", "true_z", "pred_x", "pred_y", "pred_z"]
-        rows = np.concatenate([targets, predictions], axis=1)
-    else:
-        header = ["true_azim", "true_elev", "pred_azim", "pred_elev"]
-        rows = np.column_stack(
-            [targets[:, 0], targets[:, 1], predictions[:, 0], predictions[:, 1]]
-        )
+    header = ["filename", "true_azim", "true_elev", "pred_azim", "pred_elev"]
+    rows = np.column_stack(
+        [
+            names,
+            targets[:, 0],
+            targets[:, 1],
+            predictions[:, 0],
+            predictions[:, 1],
+        ]
+    )
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -112,13 +117,11 @@ def run_inference(
 
     logger.info(f"Saved {len(rows)} predictions to {output_path}")
 
-    # Quick error summary
-    if output_mode != "cartesian":
-        azim_mae = np.mean(np.abs(predictions[:, 0] - targets[:, 0]))
-        elev_mae = np.mean(np.abs(predictions[:, 1] - targets[:, 1]))
-        logger.info(f"Azimuth MAE:   {azim_mae:.2f} deg")
-        logger.info(f"Elevation MAE: {elev_mae:.2f} deg")
-        logger.info(f"Combined MAE:  {(azim_mae + elev_mae) / 2:.2f} deg")
+    azim_mae = np.mean(np.abs(predictions[:, 0] - targets[:, 0]))
+    elev_mae = np.mean(np.abs(predictions[:, 1] - targets[:, 1]))
+    logger.info(f"Azimuth MAE:   {azim_mae:.2f} deg")
+    logger.info(f"Elevation MAE: {elev_mae:.2f} deg")
+    logger.info(f"Combined MAE:  {(azim_mae + elev_mae) / 2:.2f} deg")
 
 
 def main():

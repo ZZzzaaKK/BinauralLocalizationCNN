@@ -1,0 +1,4 @@
+Humans have a bias to estimate higher-frequency stimuli higher spatially. A lot of evidence points to this being a result of higher-level cognitive functions that result from our experiences with higher-frequency sounds often being further upward in nature. This effect is mitigated in music, where our understanding that instruments play from a stable sound source provides context that helps us localize elevation more correctly. We want to check if the DNN model exhibits a similar bias by experimenting on it similarly to what was done in [this paper](https://zenodo.org/records/17496602). However the current model implementation requires some concessions:
+
+- The model is only able to estimate in a range from 0 to 60° instead of -25 to +25°.
+- Current estimations of the model in elevation are much more error-prone than those of humans. So we may need to use chords for more spectral information rather than single notes.

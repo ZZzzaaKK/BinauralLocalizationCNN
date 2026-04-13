@@ -13,6 +13,9 @@ import coloredlogs
 import keras
 import tensorflow as tf
 from keras import layers
+from tensorflow.python.eager.polymorphic_function.eager_function_run import (
+    run_functions_eagerly,
+)
 
 logger = tf.get_logger()
 logger.setLevel(logging.DEBUG)
@@ -103,7 +106,9 @@ def create_regression_model_from_pretrained(
 
     # Create the new model
     regression_model = keras.Model(
-        inputs=inputs, outputs=outputs, name="binaural_regression"
+        inputs=inputs,
+        outputs=outputs,
+        name="binaural_regression",
     )
 
     # Handle layer freezing

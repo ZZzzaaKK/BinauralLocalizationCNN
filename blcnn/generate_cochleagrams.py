@@ -11,7 +11,7 @@ import traceback
 from functools import lru_cache
 from pathlib import Path
 from time import strftime
-from typing import List, Dict, Generator, Tuple
+from typing import Dict, Generator, List, Tuple
 
 import coloredlogs
 import numpy as np
@@ -19,32 +19,50 @@ import scipy
 import scipy as sp
 import slab
 import tensorflow as tf
+from generate_brirs import (
+    CartesianCoordinates,
+    RoomConfig,
+    SphericalCoordinates,
+    TrainingCoordinates,
+    calculate_listener_positions,
+    generate_source_positions,
+    run_brir_sim,
+)
 from nnresample import resample
 from slab import Filter
 from tqdm import tqdm
+from util import (
+    CochleagramConfig,
+    Config,
+    get_unique_folder_name,
+    load_config,
+    loc_to_CNNpos,
+)
 
-from pycochleagram import cochleagram as cgm, utils as utl
+from pycochleagram import cochleagram as cgm
+from pycochleagram import utils as utl
 
 # Add 'blcnn' to the Python path
-blcnn_path = os.path.abspath('./blcnn')
+blcnn_path = os.path.abspath("./blcnn")
 if blcnn_path not in sys.path:
     sys.path.append(blcnn_path)
 
 # Add 'pycochleagram' to the Python path
-pycochleagram_path = os.path.abspath('./pycochleagram')
+pycochleagram_path = os.path.abspath("./pycochleagram")
 if pycochleagram_path not in sys.path:
     sys.path.append(pycochleagram_path)
 
-from util import get_unique_folder_name, load_config, CochleagramConfig, Config, loc_to_CNNpos
-from generate_brirs import TrainingCoordinates, run_brir_sim, RoomConfig, calculate_listener_positions, \
-    CartesianCoordinates, generate_source_positions, SphericalCoordinates
 
 # Needed bc there's a bug in slab.Signal's add method that doesn't preserve the samplerate
 slab.Signal.set_default_samplerate(48000)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-coloredlogs.install(level='DEBUG', logger=logger, fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+coloredlogs.install(
+    level="DEBUG",
+    logger=logger,
+    fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 rms_for_debugging = []  # To collect RMS values of spatialized sounds for debugging
 
@@ -54,23 +72,32 @@ def main():
 
 
 def generate_and_persist_cochleagrams_for_multiple_HRTFs():
-    config = load_config('blcnn/config.yml')
-    logger.info(f'Loaded config: {pprint.pformat(config)}')
+    config = load_config("blcnn/config.yml")
+    logger.info(f"Loaded config: {pprint.pformat(config)}")
 
     use_bkgd = config.generate_cochleagrams.use_bkgd
     if use_bkgd:
-        logger.error('Background noise is not yet implemented. Exiting...')
+        logger.error("Background noise is not yet implemented. Exiting...")
         sys.exit(1)
 
     # Check if the HRTF files specified in the yaml exist
     for hrtf_path in config.generate_cochleagrams.hrtf_labels:
-        if not Path(f'data/brirs/{hrtf_path}').exists():
-            logger.error(f'BRIRs for the HRTF {hrtf_path} specified in config.yml do not exist. Exiting...')
+        if not Path(f"data/brirs/{hrtf_path}").exists():
+            logger.error(
+                f"BRIRs for the HRTF {hrtf_path} specified in config.yml do not exist. Exiting..."
+            )
             sys.exit(1)
 
-    inputs = [c for c in
-              itertools.product(config.generate_cochleagrams.stim_paths, config.generate_cochleagrams.hrtf_labels)]
-    logger.info(f'Found the following combinations of inputs for cochleagram generation:\n{inputs}')
+    inputs = [
+        c
+        for c in itertools.product(
+            config.generate_cochleagrams.stim_paths,
+            config.generate_cochleagrams.hrtf_labels,
+        )
+    ]
+    logger.info(
+        f"Found the following combinations of inputs for cochleagram generation:\n{inputs}"
+    )
     for stim_path, hrtf_label in inputs:
         generate_cochleagrams(config, Path(stim_path), hrtf_label)
 
@@ -82,9 +109,13 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
     timestamp = strftime("%Y-%m-%d_%H-%M-%S")
 
     if config.generate_cochleagrams.anechoic:
-        dest = get_unique_folder_name(f'data/cochleagrams/{stim_path.stem}_{hrtf_label}_anechoic/')
+        dest = get_unique_folder_name(
+            f"data/cochleagrams/{stim_path.stem}_{hrtf_label}_anechoic/"
+        )
     else:
-        dest = get_unique_folder_name(f'data/cochleagrams/{stim_path.stem}_{hrtf_label}/')
+        dest = get_unique_folder_name(
+            f"data/cochleagrams/{stim_path.stem}_{hrtf_label}/"
+        )
     Path(dest).mkdir(parents=True, exist_ok=False)
 
     # Resample background sounds to 48kHz
@@ -92,16 +123,20 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
     #     slab.Sound(file).resample(48000).write(file)
     # -> Assuming now that all textures are 48kHz
 
-    stim_paths = list(stim_path.glob('*.wav'))
+    stim_paths = list(stim_path.glob("*.wav"))
 
     path_to_backgrounds = Path(config.generate_cochleagrams.bkgd_path)
-    bkgd_paths = list(path_to_backgrounds.glob('*.wav'))
+    bkgd_paths = list(path_to_backgrounds.glob("*.wav"))
 
-    path_to_brirs = Path(f'data/brirs/{hrtf_label}')
+    path_to_brirs = Path(f"data/brirs/{hrtf_label}")
 
     options = tf.io.TFRecordOptions(tf.compat.v1.python_io.TFRecordCompressionType.GZIP)
-    train_writer = tf.io.TFRecordWriter((dest / 'train_cochleagrams.tfrecord').as_posix(), options=options)
-    test_writer = tf.io.TFRecordWriter((dest / 'test_cochleagrams.tfrecord').as_posix(), options=options)
+    train_writer = tf.io.TFRecordWriter(
+        (dest / "train_cochleagrams.tfrecord").as_posix(), options=options
+    )
+    test_writer = tf.io.TFRecordWriter(
+        (dest / "test_cochleagrams.tfrecord").as_posix(), options=options
+    )
     split = 0.8  # 80% train, 20% test
 
     train_samples = 0
@@ -129,84 +164,129 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
         ##### Sequential #####
         # global inner_bar
         # inner_bar = tqdm(desc='Generated training samples', position=1, unit='samples', leave=False)
-        for single_stim_path in tqdm(stim_paths, desc='Processed stim paths', position=0, unit='paths',
-                                     total=len(stim_paths)):
+        for single_stim_path in tqdm(
+            stim_paths,
+            desc="Processed stim paths",
+            position=0,
+            unit="paths",
+            total=len(stim_paths),
+        ):
             if config.generate_cochleagrams.anechoic:
-                for training_sample, training_coords in generate_training_sample_from_stim_path_anechoic(config,
-                                                                                                         single_stim_path,
-                                                                                                         hrtf_label):
+                for (
+                    training_sample,
+                    training_coords,
+                ) in generate_training_sample_from_stim_path_anechoic(
+                    config, single_stim_path, hrtf_label
+                ):
                     if random.random() < split:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, train_writer)
+                        write_tfrecord(
+                            training_sample,
+                            training_coords,
+                            single_stim_path.name,
+                            train_writer,
+                        )
                         train_samples += 1
                     else:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
+                        write_tfrecord(
+                            training_sample,
+                            training_coords,
+                            single_stim_path.name,
+                            test_writer,
+                        )
                         test_samples += 1
             else:
-                for training_sample, training_coords in generate_training_samples_from_stim_path(config,
-                                                                                                 single_stim_path,
-                                                                                                 path_to_brirs=path_to_brirs):
+                for (
+                    training_sample,
+                    training_coords,
+                ) in generate_training_samples_from_stim_path(
+                    config, single_stim_path, path_to_brirs=path_to_brirs
+                ):
                     if random.random() < split:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, train_writer)
+                        write_tfrecord(
+                            training_sample,
+                            training_coords,
+                            single_stim_path.name,
+                            train_writer,
+                        )
                         train_samples += 1
                     else:
-                        write_tfrecord(training_sample, training_coords, single_stim_path.name, test_writer)
+                        write_tfrecord(
+                            training_sample,
+                            training_coords,
+                            single_stim_path.name,
+                            test_writer,
+                        )
                         test_samples += 1
                     # inner_bar.update(1)
         # inner_bar.close()
     except Exception as e:
-        logger.error(f'An error occurred during BRIR generation: {e}\n'
-                     f'{traceback.print_exc()}')
+        logger.error(
+            f"An error occurred during BRIR generation: {e}\n{traceback.print_exc()}"
+        )
     finally:
         train_writer.close()
         test_writer.close()
 
         logger.info(
-            f'RMS mean / stdv of spatialized sounds before normalization: {np.mean(rms_for_debugging)} / {np.std(rms_for_debugging)}')
+            f"RMS mean / stdv of spatialized sounds before normalization: {np.mean(rms_for_debugging)} / {np.std(rms_for_debugging)}"
+        )
 
         elapsed_time = str(datetime.timedelta(seconds=time.time() - start_time))
-        summary = summarize_cochleagram_generation_info(cochleagram_config, hrtf_label, timestamp, elapsed_time, dest,
-                                                        train_samples, test_samples)
+        summary = summarize_cochleagram_generation_info(
+            cochleagram_config,
+            hrtf_label,
+            timestamp,
+            elapsed_time,
+            dest,
+            train_samples,
+            test_samples,
+        )
         logger.info(summary)
-        with open(dest / f'_summary_{timestamp}.txt', 'w') as f:
+        with open(dest / f"_summary_{timestamp}.txt", "w") as f:
             f.write(summary)
 
 
-def summarize_cochleagram_generation_info(cochleagram_config: CochleagramConfig,
-                                          hrtf_label: str,
-                                          timestamp: str,
-                                          elapsed_time: str,
-                                          dest: Path,
-                                          train_samples: int,
-                                          test_samples: int) -> str:
+def summarize_cochleagram_generation_info(
+    cochleagram_config: CochleagramConfig,
+    hrtf_label: str,
+    timestamp: str,
+    elapsed_time: str,
+    dest: Path,
+    train_samples: int,
+    test_samples: int,
+) -> str:
     # Load BRIR summary
-    path_to_brirs = Path(f'data/brirs/{hrtf_label}')
-    with open(glob.glob((path_to_brirs / '_summary_*.txt').as_posix())[0], 'r') as f:
+    path_to_brirs = Path(f"data/brirs/{hrtf_label}")
+    with open(glob.glob((path_to_brirs / "_summary_*.txt").as_posix())[0], "r") as f:
         brir_summary = f.read()
 
-    summary = f'##### COCHLEAGRAM GENERATION INFO #####\n' \
-              f'HRTF label: {hrtf_label}\n' \
-              f'Timestamp: {timestamp}\n\n' \
-              f'Total elapsed time: {elapsed_time}\n' \
-              f'Number of BRIRs found: {len(list(path_to_brirs.glob("brir_*")))}\n' \
-              f'Number of Stimuli found (only if a single folder is specified): {len(list(glob.glob(f"{cochleagram_config.stim_paths}/*.wav")))}\n' \
-              f'Number of Backgrounds found: {len(list(glob.glob(f"{cochleagram_config.bkgd_path}/*.wav")))}\n' \
-              f'Train dataset size (nr of cochleagrams): {train_samples}\n' \
-              f'Test dataset size (nr of cochleagrams): {test_samples}\n\n' \
-              f'Config:\n{pprint.pformat(cochleagram_config)}\n\n' \
-              f'Based on the following BRIR generation:\n' \
-              f'{brir_summary}\n\n' \
-              f'################################\n' \
-              f'Cochleagrams saved to: {dest}\n' \
-              f'################################\n'
+    summary = (
+        f"##### COCHLEAGRAM GENERATION INFO #####\n"
+        f"HRTF label: {hrtf_label}\n"
+        f"Timestamp: {timestamp}\n\n"
+        f"Total elapsed time: {elapsed_time}\n"
+        f"Number of BRIRs found: {len(list(path_to_brirs.glob('brir_*')))}\n"
+        f"Number of Stimuli found (only if a single folder is specified): {len(list(glob.glob(f'{cochleagram_config.stim_paths}/*.wav')))}\n"
+        f"Number of Backgrounds found: {len(list(glob.glob(f'{cochleagram_config.bkgd_path}/*.wav')))}\n"
+        f"Train dataset size (nr of cochleagrams): {train_samples}\n"
+        f"Test dataset size (nr of cochleagrams): {test_samples}\n\n"
+        f"Config:\n{pprint.pformat(cochleagram_config)}\n\n"
+        f"Based on the following BRIR generation:\n"
+        f"{brir_summary}\n\n"
+        f"################################\n"
+        f"Cochleagrams saved to: {dest}\n"
+        f"################################\n"
+    )
     return summary
 
 
-def generate_training_samples_from_stim_path(config: Config,
-                                             stim_path: Path,
-                                             brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
-                                             path_to_brirs: Path = Path('data', 'brirs_2024-09-13_14-13-42'),
-                                             no_bkgd=True
-                                             ) -> List[Tuple[np.ndarray, TrainingCoordinates]]:
+def generate_training_samples_from_stim_path(
+    config: Config,
+    stim_path: Path,
+    brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
+    path_to_brirs: Path = Path("data", "brirs_2024-09-13_14-13-42"),
+    no_bkgd=True,
+) -> List[Tuple[np.ndarray, TrainingCoordinates]]:
     #     -> Generator[
     # Tuple[slab.Sound, TrainingCoordinates], None, None]:
     """
@@ -228,51 +308,83 @@ def generate_training_samples_from_stim_path(config: Config,
     #     s.play()
     augmented_sounds = [raw_stim]
 
-    source_positions = generate_source_positions(config.generate_cochleagrams.source_positions)
-    stim_generator = generate_spatialized_sound(augmented_sounds, config.generate_brirs.room_configs, source_positions,
-                                                brir_dict=brir_dict, path_to_brirs=path_to_brirs,
-                                                generation_base_probability=config.generate_cochleagrams.generation_base_probability)
+    source_positions = generate_source_positions(
+        config.generate_cochleagrams.source_positions
+    )
+    stim_generator = generate_spatialized_sound(
+        augmented_sounds,
+        config.generate_brirs.room_configs,
+        source_positions,
+        brir_dict=brir_dict,
+        path_to_brirs=path_to_brirs,
+        generation_base_probability=config.generate_cochleagrams.generation_base_probability,
+    )
 
     training_samples = []
     # worker_nr = int(multiprocessing.current_process().name.split('-')[-1])
     # for spatialized_sound, training_coordinates in tqdm(stim_generator, desc= f'Process {worker_nr}',position=worker_nr, leave=False):
-    for spatialized_sound, training_coordinates in tqdm(stim_generator, desc='Generated training samples', position=1,
-                                                        unit='samples', leave=False):
+    for spatialized_sound, training_coordinates in tqdm(
+        stim_generator,
+        desc="Generated training samples",
+        position=1,
+        unit="samples",
+        leave=False,
+    ):
         # normalized_sound = spatialized_sound * (0.1 / np.max(np.abs(spatialized_sound.data)))  # Normalize to 0.1 peak
         normalized_sound = spatialized_sound * (
-                0.1 / np.sqrt(np.mean(spatialized_sound.data ** 2)))  # Normalize to 0.1 RMS
+            0.1 / np.sqrt(np.mean(spatialized_sound.data**2))
+        )  # Normalize to 0.1 RMS
         if no_bkgd:
-            training_samples.append((transform_stim_to_cochleagram(normalized_sound), training_coordinates))
+            training_samples.append(
+                (transform_stim_to_cochleagram(normalized_sound), training_coordinates)
+            )
         else:
-            background = create_background(training_coordinates.room_id,
-                                           training_coordinates.listener_position,
-                                           source_positions,
-                                           brir_dict=brir_dict,
-                                           path_to_brirs=path_to_brirs)
-            snr_factor = (10 ** (-random.uniform(5, 30) / 20))
+            background = create_background(
+                training_coordinates.room_id,
+                training_coordinates.listener_position,
+                source_positions,
+                brir_dict=brir_dict,
+                path_to_brirs=path_to_brirs,
+            )
+            snr_factor = 10 ** (-random.uniform(5, 30) / 20)
             combined_sound = normalized_sound + background * snr_factor
-            training_samples.append((transform_stim_to_cochleagram(combined_sound), training_coordinates))
+            training_samples.append(
+                (transform_stim_to_cochleagram(combined_sound), training_coordinates)
+            )
         # inner_bar.update(1)
     return training_samples
 
 
-def generate_training_sample_from_stim_path_anechoic(config: Config, stim_path: Path, hrtf_label: str):
-    src_positions = [c for c in itertools.product(config.generate_cochleagrams.source_positions.azimuths,
-                                                  config.generate_cochleagrams.source_positions.elevations)]
+def generate_training_sample_from_stim_path_anechoic(
+    config: Config, stim_path: Path, hrtf_label: str
+):
+    src_positions = [
+        c
+        for c in itertools.product(
+            config.generate_cochleagrams.source_positions.azimuths,
+            config.generate_cochleagrams.source_positions.elevations,
+        )
+    ]
 
     # Go through sounds in data/raw/uso_500ms_raw and apply the HRTFs
     # for sound_path in tqdm(Path('data/raw/uso_500ms_raw').glob('*.wav'), desc='Sounds', position=0):
     sound = slab.Sound(stim_path).resample(48000)
     padded_sound = zero_padding(sound, goal_duration=2, type="frontback")
     training_samples = []
-    for (azim, elev) in tqdm(src_positions, desc='HRTFs', position=1, leave=False):
+    for azim, elev in tqdm(src_positions, desc="HRTFs", position=1, leave=False):
         # 20% chance to use this HRTF
         if random.random() <= 1.0:
             hrtf_sound = interpolate_HRTF(hrtf_label, azim, elev).apply(padded_sound)
             cochleagram = transform_stim_to_cochleagram(hrtf_sound)
             training_samples.append(
-                (cochleagram, TrainingCoordinates(0, CartesianCoordinates(0, 0), SphericalCoordinates(azim, elev))))
-        print(interpolate_HRTF.cache_info(), hrtf_label, azim, elev, end='\r')
+                (
+                    cochleagram,
+                    TrainingCoordinates(
+                        0, CartesianCoordinates(0, 0), SphericalCoordinates(azim, elev)
+                    ),
+                )
+            )
+        print(interpolate_HRTF.cache_info(), hrtf_label, azim, elev, end="\r")
     return training_samples
 
 
@@ -288,10 +400,10 @@ def interpolate_HRTF(hrtf_label: str, azim: int, elev: int) -> slab.Filter:
         azim: Azimuth
         elev: Elevation
     """
-    if hrtf_label == 'slab_kemar':
+    if hrtf_label == "slab_kemar":
         loaded_hrtf = slab.HRTF.kemar()
     else:
-        loaded_hrtf = slab.HRTF(f'data/hrtfs/{hrtf_label}.sofa', verbose=True)
+        loaded_hrtf = slab.HRTF(f"data/hrtfs/{hrtf_label}.sofa", verbose=True)
     return loaded_hrtf.interpolate(azim, elev).resample(48000)
 
 
@@ -307,20 +419,29 @@ def write_tfrecord(cochleagram, training_coords, stim_file_name: str, writer):
 
     """
     # TODO: Doesn't shuffle data
-    target = loc_to_CNNpos(training_coords.source_position.azim, training_coords.source_position.elev)
+    target = loc_to_CNNpos(
+        training_coords.source_position.azim, training_coords.source_position.elev
+    )
 
     data = {
-        'train/image': tf.train.Feature(
-            bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(cochleagram.tobytes())])),  # TF2.14
+        "train/image": tf.train.Feature(
+            bytes_list=tf.train.BytesList(
+                value=[tf.compat.as_bytes(cochleagram.tobytes())]
+            )
+        ),  # TF2.14
         # 'image': tf.train.Feature(
         #     bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(cochleagram.tobytes())])),  #TF2.16
         # 'train/image_height': tf.train.Feature(int64_list=tf.train.Int64List(value=[cochleagram.shape[0]])),
         # 'train/image_width': tf.train.Feature(int64_list=tf.train.Int64List(value=[cochleagram.shape[1]])),
         # 'train/azim': tf.train.Feature(int64_list=tf.train.Int64List(value=[training_coords.source_position.azim])),
         # 'train/elev': tf.train.Feature(int64_list=tf.train.Int64List(value=[training_coords.source_position.elev])),
-        'train/target': tf.train.Feature(int64_list=tf.train.Int64List(value=[target])),  # TF2.14
+        "train/target": tf.train.Feature(
+            int64_list=tf.train.Int64List(value=[target])
+        ),  # TF2.14
         # 'target': tf.train.Feature(int64_list=tf.train.Int64List(value=[target])),  #TF2.16
-        # 'train/name': tf.train.Feature(bytes_list=tf.train.BytesList(value=[stim_file_name.encode('utf-8')]))
+        "train/name": tf.train.Feature(
+            bytes_list=tf.train.BytesList(value=[stim_file_name.encode("utf-8")])
+        ),
     }
 
     # write the single record into tfrecord file
@@ -358,9 +479,7 @@ def write_tfrecord(cochleagram, training_coords, stim_file_name: str, writer):
 
 
 def augment_raw_sound(
-        sound: slab.Sound,
-        lowest_center_freq=100,
-        nr_octaves=8
+    sound: slab.Sound, lowest_center_freq=100, nr_octaves=8
 ) -> List[slab.Sound]:
     """
     Augment a slab.Sound by applying true 2nd-order Butterworth bandpass filters.
@@ -373,18 +492,14 @@ def augment_raw_sound(
     sr = sound.samplerate
 
     for octave_index in range(nr_octaves):
-        center_freq = lowest_center_freq * 2 ** octave_index
+        center_freq = lowest_center_freq * 2**octave_index
         low_freq = center_freq / 2.0
         high_freq = min(center_freq * 2.0, (sr / 2) - 1.0)
 
         # --- DESIGN TRUE 2nd ORDER BUTTERWORTH BANDPASS ---
         # butter order=2 → bandpass is 2nd order (12 dB/oct slopes)
         sos = scipy.signal.butter(
-            N=2,
-            Wn=[low_freq, high_freq],
-            btype='band',
-            fs=sr,
-            output='sos'
+            N=2, Wn=[low_freq, high_freq], btype="band", fs=sr, output="sos"
         )
 
         # --- APPLY THE FILTER ---
@@ -395,21 +510,21 @@ def augment_raw_sound(
         augmented_sounds.append(filtered_sound)
 
         logger.debug(
-            f"Butterworth BP: center={center_freq}Hz "
-            f"range=({low_freq}-{high_freq})Hz"
+            f"Butterworth BP: center={center_freq}Hz range=({low_freq}-{high_freq})Hz"
         )
 
     logger.info(f"Augmented sound into {len(augmented_sounds)} bandpassed sounds.")
     return augmented_sounds
 
 
-def generate_spatialized_sound(sounds: List[slab.Sound],
-                               room_configs: List[RoomConfig],
-                               source_positions: List[SphericalCoordinates],
-                               brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
-                               path_to_brirs: Path = None,
-                               generation_base_probability: float = 0.05) -> Generator[
-    Tuple[slab.Sound, TrainingCoordinates], None, None]:
+def generate_spatialized_sound(
+    sounds: List[slab.Sound],
+    room_configs: List[RoomConfig],
+    source_positions: List[SphericalCoordinates],
+    brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
+    path_to_brirs: Path = None,
+    generation_base_probability: float = 0.05,
+) -> Generator[Tuple[slab.Sound, TrainingCoordinates], None, None]:
     """
     - sound generator
         - Go through all TrainingCoordinates, for all randomly picked ones:
@@ -422,13 +537,18 @@ def generate_spatialized_sound(sounds: List[slab.Sound],
     for sound in sounds:
         padded_sound = zero_padding(sound, goal_duration=2, type="frontback")
         # Render sound at different positions
-        for training_coordinates in generate_training_locations(room_configs, source_positions,
-                                                                generation_base_probability):
-            spatialized_sound = apply_brir(padded_sound, training_coordinates, brir_dict=brir_dict,
-                                           path_to_brirs=path_to_brirs)
+        for training_coordinates in generate_training_locations(
+            room_configs, source_positions, generation_base_probability
+        ):
+            spatialized_sound = apply_brir(
+                padded_sound,
+                training_coordinates,
+                brir_dict=brir_dict,
+                path_to_brirs=path_to_brirs,
+            )
             # Print RMS of spatialized sound for debugging
             if spatialized_sound is not None:
-                rms = np.sqrt(np.mean(spatialized_sound.data ** 2))
+                rms = np.sqrt(np.mean(spatialized_sound.data**2))
                 rms_for_debugging.append(rms)
             # PBAR.update(1)
             # Normalize sound to 0.1 RMS
@@ -438,11 +558,13 @@ def generate_spatialized_sound(sounds: List[slab.Sound],
                 yield spatialized_sound, training_coordinates
 
 
-def create_background(room_id: int,
-                      listener_position: CartesianCoordinates,
-                      source_positions: List[SphericalCoordinates],
-                      brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
-                      path_to_brirs: Path = None) -> slab.Sound:
+def create_background(
+    room_id: int,
+    listener_position: CartesianCoordinates,
+    source_positions: List[SphericalCoordinates],
+    brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
+    path_to_brirs: Path = None,
+) -> slab.Sound:
     """
     Creates a background texture by summing up 3-8 randomly chosen textures.
     TODO: Implement texture synthesis, either here online, or offline in Matlab
@@ -465,7 +587,12 @@ def create_background(room_id: int,
 
     """
     rand_texture_path = random.choice(
-        list(Path('data/raw/McDermott_Simoncelli_2011_168_Sound_Textures_48kHz').glob('*.wav')))
+        list(
+            Path("data/raw/McDermott_Simoncelli_2011_168_Sound_Textures_48kHz").glob(
+                "*.wav"
+            )
+        )
+    )
     background_textures = []
 
     for _ in range(random.randint(3, 8)):
@@ -478,43 +605,61 @@ def create_background(room_id: int,
         #    -> Might be most straightforward and simple though
         #  - maybe save the source positions to a file associated with the run
         random_location = random.choice(source_positions)
-        spatialized_texture = apply_brir(texture,
-                                         TrainingCoordinates(room_id,
-                                                             listener_position,
-                                                             random_location),
-                                         brir_dict=brir_dict,
-                                         path_to_brirs=path_to_brirs)
+        spatialized_texture = apply_brir(
+            texture,
+            TrainingCoordinates(room_id, listener_position, random_location),
+            brir_dict=brir_dict,
+            path_to_brirs=path_to_brirs,
+        )
         if spatialized_texture is not None:
             background_textures.append(spatialized_texture)
     # Need to supply starting sound for sum on which to add the textures
-    summed_textures = sum(background_textures, start=slab.Sound(np.zeros_like(background_textures[0].data)))
-    normalized_background = summed_textures * (0.99 / np.max(
-        np.abs(summed_textures.data)))  # no attenuation here; 0.99 to avoid technical errors when persisting
+    summed_textures = sum(
+        background_textures,
+        start=slab.Sound(np.zeros_like(background_textures[0].data)),
+    )
+    normalized_background = summed_textures * (
+        0.99 / np.max(np.abs(summed_textures.data))
+    )  # no attenuation here; 0.99 to avoid technical errors when persisting
     return normalized_background
 
 
-def generate_training_locations(room_configs: List[RoomConfig], source_positions: List[SphericalCoordinates],
-                                generation_base_probability: float) -> Generator[TrainingCoordinates, None, None]:
+def generate_training_locations(
+    room_configs: List[RoomConfig],
+    source_positions: List[SphericalCoordinates],
+    generation_base_probability: float,
+) -> Generator[TrainingCoordinates, None, None]:
     #  Dict[int, RoomConfig]
     nr_listener_positions_smallest_room = min(
-        [len(calculate_listener_positions(room.width, room.length)) for room in room_configs])
+        [
+            len(calculate_listener_positions(room.width, room.length))
+            for room in room_configs
+        ]
+    )
 
     # for augmented_sound in tqdm(range(2492)):  # ca. 31s for 2492 locations (for one sound)
     for room in room_configs:
-        listener_positions_current_room = calculate_listener_positions(room.width, room.length)
+        listener_positions_current_room = calculate_listener_positions(
+            room.width, room.length
+        )
         for listener_position in listener_positions_current_room:
             for source_position in source_positions:
-                if random.random() < (generation_base_probability * nr_listener_positions_smallest_room) / len(
-                        listener_positions_current_room):
+                if random.random() < (
+                    generation_base_probability * nr_listener_positions_smallest_room
+                ) / len(listener_positions_current_room):
                     # Normalization works: Rooms are equally represented
                     # Nr. of total locations is too big though 628k vs 545k in paper
-                    yield TrainingCoordinates(room.id, listener_position, source_position)
+                    yield TrainingCoordinates(
+                        room.id, listener_position, source_position
+                    )
 
 
-def apply_brir(sound: slab.Sound,
-               training_coordinates: TrainingCoordinates,
-               brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
-               path_to_brirs=None) -> slab.Signal | None:
+def apply_brir(
+    sound: slab.Sound,
+    training_coordinates: TrainingCoordinates,
+    brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
+    path_to_brirs=None,
+) -> slab.Signal | None:
     """
     Applies the BRIR to the given sound at the given training coordinates.
     If a BRIR dictionary is given, the BRIR is applied from the dictionary, otherwise it is calculated on the fly.
@@ -530,16 +675,27 @@ def apply_brir(sound: slab.Sound,
     # switch case
     if path_to_brirs:
         try:
-            return Filter.load(Path(path_to_brirs, f'brir_{training_coordinates}.wav.npy')).apply(sound).trim(0.0, 2.0)
+            return (
+                Filter.load(Path(path_to_brirs, f"brir_{training_coordinates}.wav.npy"))
+                .apply(sound)
+                .trim(0.0, 2.0)
+            )
         except FileNotFoundError as e:
-            logger.warning(f'An error occurred during BRIR application: {e}\n'
-                           f'Probably the BRIR file for {training_coordinates} does not exist.')
+            logger.warning(
+                f"An error occurred during BRIR application: {e}\n"
+                f"Probably the BRIR file for {training_coordinates} does not exist."
+            )
             return None
     elif brir_dict:
         # TODO: Handle if brir not in dict
         return brir_dict[training_coordinates].apply(sound).trim(0.0, 2.0)
     else:
-        return run_brir_sim(training_coordinates)[1].resample(48000).apply(sound).trim(0.0, 2.0)
+        return (
+            run_brir_sim(training_coordinates)[1]
+            .resample(48000)
+            .apply(sound)
+            .trim(0.0, 2.0)
+        )
 
 
 # DOWNSAMPLE_FILTER = make_downsample_filter()
@@ -575,7 +731,9 @@ def make_downsample_filt_tensor_hardcoded():
     downsample_filter_times = np.arange(-4097 / 2, int(4097 / 2))
     downsample_filter_response_orig = np.sinc(downsample_filter_times / 6) / 6
     downsample_filter_window = sp.signal.windows.kaiser(4097, 10.06)
-    downsample_filter_response = downsample_filter_window * downsample_filter_response_orig
+    downsample_filter_response = (
+        downsample_filter_window * downsample_filter_response_orig
+    )
     downsample_filt_tensor = tf.constant(downsample_filter_response, tf.float32)
     downsample_filt_tensor = tf.expand_dims(downsample_filt_tensor, 0)
     downsample_filt_tensor = tf.expand_dims(downsample_filt_tensor, 2)
@@ -624,8 +782,8 @@ def compress_and_downsample(signal):
         signal,
         DS_KERNEL,
         strides=[1, 1, 6, 1],
-        padding='SAME',
-        name='conv2d_cochleagram_raw'
+        padding="SAME",
+        name="conv2d_cochleagram_raw",
     )
 
     # Half-wave rectification (nonlinear)
@@ -641,8 +799,7 @@ def compress_and_downsample(signal):
 
     # Re-stack into stereo format: (39, 8000, 2)
     downsampled_reshaped = tf.stack(
-        [L_channel_downsampled, R_channel_downsampled],
-        axis=2
+        [L_channel_downsampled, R_channel_downsampled], axis=2
     )
 
     # Power-law amplitude compression (mimics cochlear loudness perception)
@@ -665,7 +822,9 @@ def compress_and_downsample(signal):
 
 def profile_transform_stim_to_cochleagram():
     stim = slab.Binaural(slab.Sound.pinknoise(duration=3.0, samplerate=48000))
-    import cProfile, pstats
+    import cProfile
+    import pstats
+
     with cProfile.Profile() as pr:
         for _ in range(100):
             print(_)
@@ -674,7 +833,7 @@ def profile_transform_stim_to_cochleagram():
     stats = pstats.Stats(pr)
     stats.sort_stats(pstats.SortKey.TIME)
     stats.print_stats()
-    stats.dump_stats(filename='profile_stats_cochleagram.prof')
+    stats.dump_stats(filename="profile_stats_cochleagram.prof")
 
 
 def plot_cochleagram(cochleagram):
@@ -686,15 +845,16 @@ def plot_cochleagram(cochleagram):
     left = cochleagram[:, :, 0]
     right = cochleagram[:, :, 1]
     fig, axs = plt.subplots(2, 1, figsize=(20, 10))
-    axs[0].imshow(left, aspect='auto', cmap='PuOr', origin='lower')
-    axs[1].imshow(right, aspect='auto', cmap='PuOr', origin='lower')
+    axs[0].imshow(left, aspect="auto", cmap="PuOr", origin="lower")
+    axs[1].imshow(right, aspect="auto", cmap="PuOr", origin="lower")
     plt.show()
 
 
 def plot_slab_cochleagram(cochleagram):
     import matplotlib.pyplot as plt
+
     # Shape of cochleagram: (120000, 39)
-    plt.imshow(cochleagram.T, aspect='auto', cmap='PuOr', origin='lower')
+    plt.imshow(cochleagram.T, aspect="auto", cmap="PuOr", origin="lower")
     plt.show()
 
 
@@ -705,7 +865,7 @@ First: Not a generator, but a small dataset that can be saved to a tfrecord; tak
 TODO:
 - function to generate background noise samples -> See if easier to run entirely in Matlab
     - Calls Matlab code to generate textures
-    - Params for one sample -> texture transformation: samplerate, nr_textures (1000), duration (5s) 
+    - Params for one sample -> texture transformation: samplerate, nr_textures (1000), duration (5s)
     - Input: List of sound samples (what format?)
     - Cut down to 2s
     - Note: Picked 50 sound samples that made textures that were good (see paper)
@@ -746,10 +906,17 @@ ncalls  tottime  percall  cumtime  percall filename:lineno(function)
 """
 
 
-def cochleagram_wrapper(stim: np.ndarray, sig_samplerate=48000,
-                        coch_gen_sig_cutoff=2, coch_freq_lims=(30, 20000),
-                        minimum_padding=0.35, final_stim_length=1,
-                        hanning_windowed=True, sliced=True, dual_channel=True):
+def cochleagram_wrapper(
+    stim: np.ndarray,
+    sig_samplerate=48000,
+    coch_gen_sig_cutoff=2,
+    coch_freq_lims=(30, 20000),
+    minimum_padding=0.35,
+    final_stim_length=1,
+    hanning_windowed=True,
+    sliced=True,
+    dual_channel=True,
+):
     """
     pass the stimulus, stim through the cochleagram
     Args:
@@ -796,12 +963,24 @@ def cochleagram_wrapper(stim: np.ndarray, sig_samplerate=48000,
     # Apparently can be run in batched mode, batch dimension is the first dimension -> Otherwise creates redundant filters
     # Maybe a @lru_cache decorator can be used to cache the filters?
     # -> Returns np.array of shape (num_channels, num_samples)
-    subbands_r = cgm.human_cochleagram(r_channel, stim_freq, low_lim=coch_freq_lims[0], hi_lim=coch_freq_lims[1],
-                                       sample_factor=sample_factor, padding_size=10000,
-                                       ret_mode='subband').astype(np.float32)
-    subbands_l = cgm.human_cochleagram(l_channel, stim_freq, low_lim=coch_freq_lims[0], hi_lim=coch_freq_lims[1],
-                                       sample_factor=sample_factor, padding_size=10000,
-                                       ret_mode='subband').astype(np.float32)
+    subbands_r = cgm.human_cochleagram(
+        r_channel,
+        stim_freq,
+        low_lim=coch_freq_lims[0],
+        hi_lim=coch_freq_lims[1],
+        sample_factor=sample_factor,
+        padding_size=10000,
+        ret_mode="subband",
+    ).astype(np.float32)
+    subbands_l = cgm.human_cochleagram(
+        l_channel,
+        stim_freq,
+        low_lim=coch_freq_lims[0],
+        hi_lim=coch_freq_lims[1],
+        sample_factor=sample_factor,
+        padding_size=10000,
+        ret_mode="subband",
+    ).astype(np.float32)
 
     if sliced:
         front_limit = minimum_padding_n
@@ -815,7 +994,9 @@ def cochleagram_wrapper(stim: np.ndarray, sig_samplerate=48000,
 
     if dual_channel:
         num_channels = subbands_l.shape[0] - 2 * sample_factor
-        subbands = np.empty([num_channels, final_stim_length_n, 2], dtype=subbands_l.dtype)
+        subbands = np.empty(
+            [num_channels, final_stim_length_n, 2], dtype=subbands_l.dtype
+        )
         # not taking first and last filters because we don't want the low and
         # highpass filters
         subbands[:, :, 0] = subbands_l[sample_factor:-sample_factor]
@@ -823,12 +1004,16 @@ def cochleagram_wrapper(stim: np.ndarray, sig_samplerate=48000,
     else:
         # Interleaving subbands,so local filters can access both channels
         num_channels = subbands_l.shape[0] - 2 * sample_factor
-        subbands = np.empty([(2 * num_channels), final_stim_length_n], dtype=subbands_l.dtype)
+        subbands = np.empty(
+            [(2 * num_channels), final_stim_length_n], dtype=subbands_l.dtype
+        )
         subbands[0::2] = subbands_l[sample_factor:-sample_factor]
         subbands[1::2] = subbands_r[sample_factor:-sample_factor]
 
     # Cut anything -60 dB below peak
-    max_val = subbands.max() if subbands.max() > abs(subbands.min()) else abs(subbands.min())
+    max_val = (
+        subbands.max() if subbands.max() > abs(subbands.min()) else abs(subbands.min())
+    )
     cutoff = max_val / 1000
     subbands[np.abs(subbands) < cutoff] = 0
     # text input as bytes so bytes objects necessary for comparison
@@ -851,8 +1036,8 @@ def apply_hanning_window(stim, ramp_duration_ms, sample_rate=48000):
     ramp_dur_smp = int(np.floor(ramp_duration_ms * sample_rate / 1000))
     hanning_window = np.hanning(ramp_dur_smp * 2)
     onset_win = stim_np[:ramp_dur_smp] * hanning_window[:ramp_dur_smp]
-    middle = stim_np[ramp_dur_smp:stim_dur_smp - ramp_dur_smp]
-    end_win = stim_np[stim_dur_smp - ramp_dur_smp:] * hanning_window[ramp_dur_smp:]
+    middle = stim_np[ramp_dur_smp : stim_dur_smp - ramp_dur_smp]
+    end_win = stim_np[stim_dur_smp - ramp_dur_smp :] * hanning_window[ramp_dur_smp:]
     windowed_stim = np.concatenate((onset_win, middle, end_win))
     return windowed_stim
 
@@ -865,19 +1050,27 @@ def zero_padding(stim, type="front", goal_duration=2.1):
     curr_n_samples = stim.n_samples
     if type == "frontback":
         missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples) / 2)
-        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        padding = slab.Sound.silence(
+            missing_length_ns, stim.samplerate, stim.n_channels
+        )
         return slab.Sound.sequence(padding, stim, padding)
     elif type == "front":
         missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples))
-        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        padding = slab.Sound.silence(
+            missing_length_ns, stim.samplerate, stim.n_channels
+        )
         return slab.Sound.sequence(padding, stim)
     elif type == "back":
         missing_length_ns = int((goal_duration * stim.samplerate - curr_n_samples))
-        padding = slab.Sound.silence(missing_length_ns, stim.samplerate, stim.n_channels)
+        padding = slab.Sound.silence(
+            missing_length_ns, stim.samplerate, stim.n_channels
+        )
         return slab.Sound.sequence(stim, padding)
 
 
-def normalize_binaural_stim(orig_stim: np.ndarray, orig_sr, target_sr=48000, scaling_max=0.1, min_len=2):
+def normalize_binaural_stim(
+    orig_stim: np.ndarray, orig_sr, target_sr=48000, scaling_max=0.1, min_len=2
+):
     """
     read binaural sound from wavefile and prepare it for feeding into cochleagram wrapper
     Args:
@@ -890,10 +1083,11 @@ def normalize_binaural_stim(orig_stim: np.ndarray, orig_sr, target_sr=48000, sca
     Returns:
         standardized binaural stim, as well as sampling frequency of the stim
     """
-    assert orig_stim.shape[1] == 2, 'a binaural stimulus with shape N-by-2 is needed'
-    assert orig_stim.shape[0] >= orig_sr * min_len, 'the stimulus must have at least {} ' \
-                                                    'seconds duration'.format(min_len)
-    stim_wav = scaling_max * utl.rescale_sound(orig_stim, 'normalize')
+    assert orig_stim.shape[1] == 2, "a binaural stimulus with shape N-by-2 is needed"
+    assert orig_stim.shape[0] >= orig_sr * min_len, (
+        "the stimulus must have at least {} seconds duration".format(min_len)
+    )
+    stim_wav = scaling_max * utl.rescale_sound(orig_stim, "normalize")
     stim_wav = stim_wav.T
     if orig_sr != target_sr:
         # stim_wav_empty = np.empty_like(stim_wav)

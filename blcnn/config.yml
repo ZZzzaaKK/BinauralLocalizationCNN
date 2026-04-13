@@ -4,7 +4,7 @@
 generate_brirs:
   hrtfs:
     - slab_kemar # Special case that uses the HRTF from the slab package
-      # - data/hrtfs/hrtf_nh2.sofa
+    # - data/hrtfs/dtf_nh2.sofa
   # Source positions and room configs taken from McDermott's paper
   # Recommended to generate all of these and then to specify which ones to use in the generate_cochleagrams config
   # Azimuth starts at 0 in front and wraps clockwise around the listener
@@ -65,9 +65,9 @@ generate_brirs:
 generate_cochleagrams:
   hrtf_labels: # Which BRIR sets from the generate_brirs.py output to use, only name without extension
     - slab_kemar
-      # - hrtf_nh2
+    # - dtf_nh2
   stim_paths: #  List of paths to stim folders. Generates cochleagrams for all hrtf and stim path combinations
-    - data/raw/natural_selection
+    - data/raw/stimuli/chords/viola
   source_positions: # Which source positions to use. Positions must be in the generated BRIRs, otherwise they're skipped.
     azimuths: [
         0,
@@ -121,8 +121,8 @@ generate_cochleagrams:
 run_models:
   folder: test # Folder where the freeze trained models are stored
   labels: # <stim_path>_<hrtf_label> -> Which cochleagram sets from the generate_cochleagrams.py output to use, only name without extension
-    - selection_slab_kemar
-  models_to_use: [12] # Ignored at the moment
+    - flute_slab_kemar
+  models_to_use: [1]
 
 # Configuration for plotting.py
 plotting:
