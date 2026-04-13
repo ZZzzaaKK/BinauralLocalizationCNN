@@ -4,7 +4,6 @@
 data/hrtfs/**
 data/brirs/**
 data/output/**
-!data/output/regression*
 data/cochleagrams/**
 data/raw/**
 data/_misc/
