@@ -253,8 +253,12 @@ def train_regression_model(
     # Train
     logger.info("Starting training...")
     history = regression_model.fit(
-        train_dataset,
-        validation_data=val_dataset if val_dataset is not None else None,
+        train_dataset.map(lambda images, targets, names: (images, targets)),
+        validation_data=val_dataset.map(
+            lambda images, targets, names: (images, targets)
+        )
+        if val_dataset is not None
+        else None,
         epochs=epochs,
         callbacks=callbacks
         if val_dataset is not None
