@@ -73,7 +73,6 @@ def apply_scene_eq(x, sr, elevation, elev_min=0.0, elev_max=70.0,
 
 def shape_training_sound(sound: Sound, elevation, **eq_kwargs):
     """Load mono slab.Sound, apply scene EQ, return new slab.Sound."""
-    print(sound)
     x = np.asarray(sound.data)
     if x.ndim == 2:
         x_mono = x.mean(axis=1)
