@@ -19,6 +19,7 @@ import scipy
 import scipy as sp
 import slab
 import tensorflow as tf
+from blcnn.experiments.elevation_bias.statistical_bias import shape_training_sound
 from generate_brirs import (
     CartesianCoordinates,
     RoomConfig,
@@ -147,23 +148,6 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
     rms_for_debugging = []
 
     try:
-        ##### Parallel #####
-        # nr_workers = multiprocessing.cpu_count()
-        # div, mod = divmod(len(stim_paths), nr_workers)
-        # chunksize = div + 1 if mod else div
-        #
-        # logging.info(f'Using {nr_workers} workers')
-        # logging.info(f'Chunksizes: {chunksize}')
-        #
-        # training_samples = []
-        # with Pool(nr_workers) as pool:
-        #     for samples_from_one_sound in tqdm(pool.imap_unordered(generate_training_samples_from_stim_path, stim_paths, chunksize=chunksize),
-        #                                        desc='Raw sounds transformed', total=len(stim_paths), position=0):
-        #         training_samples.extend(samples_from_one_sound)
-        #         bar.update(len(samples_from_one_sound))
-        ##### Sequential #####
-        # global inner_bar
-        # inner_bar = tqdm(desc='Generated training samples', position=1, unit='samples', leave=False)
         for single_stim_path in tqdm(
             stim_paths,
             desc="Processed stim paths",
@@ -330,6 +314,10 @@ def generate_training_samples_from_stim_path(
         unit="samples",
         leave=False,
     ):
+        # TODO: Remove after generating cochleagrams for elevation bias experiment
+        # Filters the sound so that the higher-frequency content is amplified if the sound is elevated
+        # Goal is to see if we can bias the model toward a frequency-elevation bias like in humans
+        shape_training_sound(spatialized_sound, training_coordinates.source_position.elev)
         # normalized_sound = spatialized_sound * (0.1 / np.max(np.abs(spatialized_sound.data)))  # Normalize to 0.1 peak
         normalized_sound = spatialized_sound * (
             0.1 / np.sqrt(np.mean(spatialized_sound.data**2))
