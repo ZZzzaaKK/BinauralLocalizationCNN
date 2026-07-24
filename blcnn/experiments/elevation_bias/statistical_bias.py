@@ -2,6 +2,7 @@ import numpy as np
 import slab
 import os
 import matplotlib.pyplot as plt
+from slab.sound import Sound
 
 
 
@@ -70,8 +71,9 @@ def apply_scene_eq(x, sr, elevation, elev_min=0.0, elev_max=70.0,
         y *= rms_orig / rms_new
     return y
 
-def shape_training_sound(sound, elevation, **eq_kwargs):
+def shape_training_sound(sound: Sound, elevation, **eq_kwargs):
     """Load mono slab.Sound, apply scene EQ, return new slab.Sound."""
+    print(sound)
     x = np.asarray(sound.data)
     if x.ndim == 2:
         x_mono = x.mean(axis=1)
@@ -79,14 +81,3 @@ def shape_training_sound(sound, elevation, **eq_kwargs):
         x_mono = x
     y = apply_scene_eq(x_mono, int(sound.samplerate), elevation, **eq_kwargs)
     return slab.Sound(y, samplerate=sound.samplerate)
-
-# ------------------------------------------------------------
-# main loop for generating the sounds
-# ------------------------------------------------------------
-
-for tone in TRAINING_TONES:
-    for elevation in ELEVATIONS:
-        shaped = shape_training_sound(tone, elevation, **EQ_KWARGS)
-
-        output_path = os.path.join(OUTPUT_DIR, f'{tone[:-4]}_{elevation}dB.wav')
-        shaped.write(output_path)
