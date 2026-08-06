@@ -8,10 +8,11 @@ import random
 import sys
 import time
 import traceback
+from collections.abc import Generator
 from functools import lru_cache
 from pathlib import Path
 from time import strftime
-from typing import Dict, Generator, List, Tuple
+from typing import Dict, List, Tuple
 
 import coloredlogs
 import numpy as np
@@ -19,7 +20,6 @@ import scipy
 import scipy as sp
 import slab
 import tensorflow as tf
-from blcnn.experiments.elevation_bias.statistical_bias import shape_training_sound
 from generate_brirs import (
     CartesianCoordinates,
     RoomConfig,
@@ -40,6 +40,7 @@ from util import (
     loc_to_CNNpos,
 )
 
+from blcnn.experiments.elevation_bias.statistical_bias import shape_training_sound
 from pycochleagram import cochleagram as cgm
 from pycochleagram import utils as utl
 
@@ -67,6 +68,14 @@ coloredlogs.install(
 
 rms_for_debugging = []  # To collect RMS values of spatialized sounds for debugging
 
+EQ_KWARGS = {
+    "elev_min": 0.0,
+    "elev_max": 70.0,
+    "f_low": 400.0,
+    "f_high": 6300.0,
+    "sigma_octaves": 1.2,
+    "peak_gain_db": 12,   # pilot: 3, 6, 9
+}
 
 def main():
     generate_and_persist_cochleagrams_for_multiple_HRTFs()
@@ -317,7 +326,7 @@ def generate_training_samples_from_stim_path(
         # TODO: Remove after generating cochleagrams for elevation bias experiment
         # Filters the sound so that the higher-frequency content is amplified if the sound is elevated
         # Goal is to see if we can bias the model toward a frequency-elevation bias like in humans
-        shape_training_sound(spatialized_sound, training_coordinates.source_position.elev)
+        shape_training_sound(spatialized_sound, training_coordinates.source_position.elev, **EQ_KWARGS)
         # normalized_sound = spatialized_sound * (0.1 / np.max(np.abs(spatialized_sound.data)))  # Normalize to 0.1 peak
         normalized_sound = spatialized_sound * (
             0.1 / np.sqrt(np.mean(spatialized_sound.data**2))

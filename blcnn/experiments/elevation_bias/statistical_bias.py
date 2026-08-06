@@ -1,33 +1,6 @@
 import numpy as np
 import slab
-import os
-import matplotlib.pyplot as plt
 from slab.sound import Sound
-
-
-
-plt.rcParams['svg.fonttype'] = 'none'
-
-DIR = os.getcwd()
-TRAINING_STIM_DIR = f'{DIR}/data/raw/naturalsounds165'
-OUTPUT_DIR = f'{DIR}/data/raw/naturalsounds165_scene_eq'
-
-TRAINING_TONES = [f for f in os.listdir(TRAINING_STIM_DIR) if 'stim' in f]
-
-ELEVATIONS = np.arange(0, 70, 10)
-
-EQ_KWARGS = dict(
-    elev_min=0.0,
-    elev_max=70.0,
-    f_low=400.0,
-    f_high=6300.0,
-    sigma_octaves=1.2,
-    peak_gain_db=12,   # pilot: 3, 6, 9
-)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-
-# functions
 
 def elevation_to_center_hz(elevation, elev_min, elev_max, f_low=400.0, f_high=6300.0):
     """Map elevation to Gaussian center on a log-frequency axis (Parise: low elev → low freq)."""

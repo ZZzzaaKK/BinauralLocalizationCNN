@@ -67,7 +67,7 @@ generate_cochleagrams:
     - slab_kemar
     # - dtf_nh2
   stim_paths: #  List of paths to stim folders. Generates cochleagrams for all hrtf and stim path combinations
-    - data/raw/stimuli/chords/viola
+    - data/raw/stimuli/natural-selection
   source_positions: # Which source positions to use. Positions must be in the generated BRIRs, otherwise they're skipped.
     azimuths: [
         0,
