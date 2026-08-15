@@ -2,6 +2,7 @@ import numpy as np
 import slab
 from slab.sound import Sound
 
+
 def elevation_to_center_hz(elevation, elev_min, elev_max, f_low=400.0, f_high=6300.0):
     """Map elevation to Gaussian center on a log-frequency axis (Parise: low elev → low freq)."""
     elev = np.clip(elevation, elev_min, elev_max)

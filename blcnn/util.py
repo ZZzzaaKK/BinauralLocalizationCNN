@@ -1,11 +1,14 @@
 import functools
 import json
 from dataclasses import dataclass
+from os import stat
 from pathlib import Path
 from typing import List
 
 import tensorflow as tf
 import yaml
+
+from blcnn.experiments.elevation_bias import probability_bias
 
 
 @dataclass
@@ -44,6 +47,8 @@ class CochleagramConfig:
     anechoic: bool
     train_test_split: float
     generation_base_probability: float
+    statistical_bias: bool
+    probability_bias: bool
 
 
 @dataclass
@@ -134,6 +139,8 @@ def load_config(file_path: str) -> Config:
             generation_base_probability=raw_config["generate_cochleagrams"][
                 "generation_base_probability"
             ],
+            probability_bias=raw_config["generate_cochleagrams"]["probability_bias"],
+            statistical_bias=raw_config["generate_cochleagrams"]["statistical_bias"],
         ),
         # freeze_training=FreezeTrainingConfig(
         #     labels=raw_config['freeze_training']['labels'],

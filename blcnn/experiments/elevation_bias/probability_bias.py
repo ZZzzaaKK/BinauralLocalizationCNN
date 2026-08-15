@@ -1,7 +1,7 @@
 """
-For each elevation in [0, 60]°, pick one naturalsounds165 stimulus at random, with
-selection probability biased toward lower spectral centroid at low elevation and
-higher spectral centroid at high elevation (Parise-style spectrum–elevation mapping).
+For each naturalsounds165 stimulus, draw several elevations in [0, 60]°, with
+selection probability biased toward lower elevation for low spectral centroid and
+higher elevation for high centroid (inverse of the Parise-style spectrum–elevation mapping).
 """
 
 import os
@@ -17,43 +17,25 @@ plt.rcParams["svg.fonttype"] = "none"
 DIR = os.getcwd()
 RESULTS_DIR = f"{DIR}/data/results"
 PLOT_DIR = f"{DIR}/data/plots"
-TRAINING_STIM_DIR = f"{DIR}/data/raw/stimuli/naturalsounds165"
-OUTPUT_DIR = f"{DIR}/stimuli/naturalsounds165_probability_bias"
-CENTROID_CACHE = f"{RESULTS_DIR}/naturalsounds165_spectral_centroids.csv"
-MANIFEST_PATH = f"{RESULTS_DIR}/naturalsounds165_probability_bias_manifest.csv"
+TRAINING_STIM_DIR = f"{DIR}/data/stimuli/naturalsounds165"
+CENTROID_CACHE = f"{RESULTS_DIR}/data/naturalsounds165_spectral_centroids.csv"
+MANIFEST_PATH = f"{RESULTS_DIR}/data/naturalsounds165_probability_bias_manifest.csv"
 
 ELEV_MIN = 0.0
 ELEV_MAX = 60.0
-ELEVATIONS = np.arange(0, 61, 10)  # 0, 10, …, 60
+N_LOCATIONS_PER_SOUND = 10
 RNG_SEED = 42
-# Gaussian width on centroid axis (Hz); smaller → sharper elevation–centroid coupling
-SIGMA_HZ = 1800.0
+# Gaussian width on centroid axis in the old sound-selection formulation; converted to ° on elevation
+SIGMA_HZ = 1600.0
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-
-def spectral_centroid(x, sr):
-    S = np.abs(librosa.stft(x, n_fft=2048, hop_length=512))
-    return float(np.mean(librosa.feature.spectral_centroid(S=S, sr=sr)[0]))
-
-
-def load_mono(path):
-    sound = slab.Sound(path)
-    x = np.asarray(sound.data).squeeze()
-    if x.ndim == 2:
-        x = x.mean(axis=1)
-    return x, int(sound.samplerate)
-
-
-def build_centroid_table(stim_dir):
-    stim_files = sorted(f for f in os.listdir(stim_dir) if f.startswith("stim") and f.endswith(".wav"))
+def build_centroid_table(sounds: list[slab.Sound]):
     rows = []
-    for fname in stim_files:
-        path = os.path.join(stim_dir, fname)
-        x, sr = load_mono(path)
-        rows.append({"stimulus": fname, "spectral_centroid_hz": spectral_centroid(x, sr)})
-    return pd.DataFrame(rows)
+    for sound in sounds:
+        centroid = sound.spectral_feature("centroid")[0]
+        rows.append({"stimulus": sound.name, "spectral_centroid_hz": centroid})
+    return pd.DataFrame(rows).set_index("stimulus")
 
 
 def elevation_to_target_centroid(elevation, elev_min, elev_max, cent_min, cent_max):
@@ -62,81 +44,51 @@ def elevation_to_target_centroid(elevation, elev_min, elev_max, cent_min, cent_m
     return cent_min + t * (cent_max - cent_min)
 
 
-def selection_probabilities(centroids_hz, target_hz, sigma_hz):
-    z = (np.asarray(centroids_hz, dtype=float) - target_hz) / sigma_hz
-    weights = np.exp(-0.5 * z ** 2)
+def centroid_to_target_elevation(centroid_hz, cent_min, cent_max, elev_min, elev_max):
+    centroid_hz = np.clip(centroid_hz, cent_min, cent_max)
+    print(centroid_hz, cent_min, cent_max, elev_min, elev_max)
+    t = (centroid_hz - cent_min) / (cent_max - cent_min)
+    return elev_min + t * (elev_max - elev_min)
+
+
+def hz_sigma_to_elev_sigma(sigma_hz, cent_min, cent_max, elev_min, elev_max):
+    span_cent = cent_max - cent_min
+    span_elev = elev_max - elev_min
+    if span_cent <= 0:
+        return float(sigma_hz)
+    return float(sigma_hz * span_elev / span_cent)
+
+
+def selection_probabilities(values, target, sigma):
+    z = (np.asarray(values, dtype=float) - target) / sigma
+    weights = np.exp(-0.5 * z**2)
     total = weights.sum()
     if total <= 0:
         return np.full(len(weights), 1.0 / len(weights))
     return weights / total
 
 
-def pick_sound_for_elevation(centroid_df, elevation, rng, sigma_hz=SIGMA_HZ):
-    centroids = centroid_df["spectral_centroid_hz"].to_numpy()
-    c_min, c_max = centroids.min(), centroids.max()
-    target = elevation_to_target_centroid(elevation, ELEV_MIN, ELEV_MAX, c_min, c_max)
-    probs = selection_probabilities(centroids, target, sigma_hz)
-    idx = rng.choice(len(centroid_df), p=probs)
-    row = centroid_df.iloc[idx]
-    return {
-        "elevation": float(elevation),
-        "stimulus": row["stimulus"],
-        "spectral_centroid_hz": float(row["spectral_centroid_hz"]),
-        "target_centroid_hz": float(target),
-    }
-
-
-if os.path.isfile(CENTROID_CACHE):
-    centroid_df = pd.read_csv(CENTROID_CACHE)
-else:
-    centroid_df = build_centroid_table(TRAINING_STIM_DIR)
-    centroid_df.to_csv(CENTROID_CACHE, index=False)
-
-rng = np.random.default_rng(RNG_SEED)
-manifest_rows = []
-
-for repeat_idx in range(10):
-    for elevation in ELEVATIONS:
-        pick = pick_sound_for_elevation(centroid_df, elevation, rng)
-        pick = pick.copy()
-        pick["repeat_index"] = repeat_idx + 1
-        manifest_rows.append(pick)
-        print(
-            f"rep {repeat_idx+1}, {elevation:3.0f}° → {pick['stimulus']} "
-            f"(centroid {pick['spectral_centroid_hz']:.0f} Hz, "
-            f"target {pick['target_centroid_hz']:.0f} Hz)"
+def compute_elevation_distribution_for_sound(
+    centroid_hz,
+    # n_locations,
+    rng,
+    cent_min,
+    cent_max,
+    elev_min=ELEV_MIN,
+    elev_max=ELEV_MAX,
+    sigma_elev=None,
+    elevation_grid=None,
+):
+    if elevation_grid is None:
+        elevation_grid = np.linspace(elev_min, elev_max, int(elev_max - elev_min) + 1)
+    target_elev = centroid_to_target_elevation(
+        centroid_hz, cent_min, cent_max, elev_min, elev_max
+    )
+    if sigma_elev is None:
+        sigma_elev = hz_sigma_to_elev_sigma(
+            SIGMA_HZ, cent_min, cent_max, elev_min, elev_max
         )
-
-manifest_df = pd.DataFrame(manifest_rows)
-manifest_df.to_csv(MANIFEST_PATH, index=False)
-print(f"\nWrote {len(manifest_df)} files to {OUTPUT_DIR}")
-print(f"Manifest: {MANIFEST_PATH}")
-
-# --- diagnostic: selected centroid vs elevation ---
-fig, ax = plt.subplots(figsize=(6, 4))
-ax.scatter(
-    manifest_df["elevation"],
-    manifest_df["spectral_centroid_hz"],
-    s=80,
-    c=manifest_df["elevation"],
-    cmap="inferno",
-    edgecolors="k",
-    linewidths=0.6,
-    zorder=3,
-)
-cent_all = centroid_df["spectral_centroid_hz"]
-t_line = np.linspace(ELEV_MIN, ELEV_MAX, 100)
-target_line = elevation_to_target_centroid(
-    t_line, ELEV_MIN, ELEV_MAX, cent_all.min(), cent_all.max()
-)
-ax.plot(t_line, target_line, "k--", linewidth=1.2, label="Target centroid vs elevation")
-ax.set_xlim(ELEV_MIN - 2, ELEV_MAX + 2)
-ax.set_xlabel("Elevation (°)")
-ax.set_ylabel("Spectral centroid of selected sound (Hz)")
-ax.set_title("Probability-biased sound selection (one draw per elevation)")
-ax.legend(frameon=False)
-ax.grid(True, alpha=0.25)
-fig.tight_layout()
-fig.savefig(f"{PLOT_DIR}/probability_bias_selection.svg", dpi=300)
-fig.savefig(f"{PLOT_DIR}/probability_bias_selection.png", dpi=300)
-plt.close(fig)
+    probs = selection_probabilities(elevation_grid, target_elev, sigma_elev)
+    # chosen = rng.choice(elevation_grid, size=n_locations, p=probs)
+    # return chosen, float(target_elev)
+    return probs

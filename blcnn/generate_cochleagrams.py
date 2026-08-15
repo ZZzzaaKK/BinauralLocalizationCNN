@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple
 
 import coloredlogs
 import numpy as np
+import pandas as pd
 import scipy
 import scipy as sp
 import slab
@@ -30,6 +31,7 @@ from generate_brirs import (
     run_brir_sim,
 )
 from nnresample import resample
+from numpy.typing import NDArray
 from slab import Filter
 from tqdm import tqdm
 from util import (
@@ -40,6 +42,14 @@ from util import (
     loc_to_CNNpos,
 )
 
+from blcnn.experiments.elevation_bias.probability_bias import (
+    ELEV_MAX,
+    ELEV_MIN,
+    SIGMA_HZ,
+    build_centroid_table,
+    compute_elevation_distribution_for_sound,
+    hz_sigma_to_elev_sigma,
+)
 from blcnn.experiments.elevation_bias.statistical_bias import shape_training_sound
 from pycochleagram import cochleagram as cgm
 from pycochleagram import utils as utl
@@ -77,6 +87,7 @@ EQ_KWARGS = {
     "peak_gain_db": 12,   # pilot: 3, 6, 9
 }
 
+
 def main():
     generate_and_persist_cochleagrams_for_multiple_HRTFs()
 
@@ -108,6 +119,7 @@ def generate_and_persist_cochleagrams_for_multiple_HRTFs():
     logger.info(
         f"Found the following combinations of inputs for cochleagram generation:\n{inputs}"
     )
+
     for stim_path, hrtf_label in inputs:
         generate_cochleagrams(config, Path(stim_path), hrtf_label)
 
@@ -127,11 +139,6 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
             f"data/cochleagrams/{stim_path.stem}_{hrtf_label}/"
         )
     Path(dest).mkdir(parents=True, exist_ok=False)
-
-    # Resample background sounds to 48kHz
-    # for file in Path('resources/McDermott_Simoncelli_2011_168_Sound_Textures_48kHz').glob('*.wav'):
-    #     slab.Sound(file).resample(48000).write(file)
-    # -> Assuming now that all textures are 48kHz
 
     stim_paths = list(stim_path.glob("*.wav"))
 
@@ -306,7 +313,7 @@ def generate_training_samples_from_stim_path(
     )
     stim_generator = generate_spatialized_sound(
         augmented_sounds,
-        config.generate_brirs.room_configs,
+        config,
         source_positions,
         brir_dict=brir_dict,
         path_to_brirs=path_to_brirs,
@@ -314,8 +321,6 @@ def generate_training_samples_from_stim_path(
     )
 
     training_samples = []
-    # worker_nr = int(multiprocessing.current_process().name.split('-')[-1])
-    # for spatialized_sound, training_coordinates in tqdm(stim_generator, desc= f'Process {worker_nr}',position=worker_nr, leave=False):
     for spatialized_sound, training_coordinates in tqdm(
         stim_generator,
         desc="Generated training samples",
@@ -323,11 +328,6 @@ def generate_training_samples_from_stim_path(
         unit="samples",
         leave=False,
     ):
-        # TODO: Remove after generating cochleagrams for elevation bias experiment
-        # Filters the sound so that the higher-frequency content is amplified if the sound is elevated
-        # Goal is to see if we can bias the model toward a frequency-elevation bias like in humans
-        shape_training_sound(spatialized_sound, training_coordinates.source_position.elev, **EQ_KWARGS)
-        # normalized_sound = spatialized_sound * (0.1 / np.max(np.abs(spatialized_sound.data)))  # Normalize to 0.1 peak
         normalized_sound = spatialized_sound * (
             0.1 / np.sqrt(np.mean(spatialized_sound.data**2))
         )  # Normalize to 0.1 RMS
@@ -348,7 +348,6 @@ def generate_training_samples_from_stim_path(
             training_samples.append(
                 (transform_stim_to_cochleagram(combined_sound), training_coordinates)
             )
-        # inner_bar.update(1)
     return training_samples
 
 
@@ -363,14 +362,12 @@ def generate_training_sample_from_stim_path_anechoic(
         )
     ]
 
-    # Go through sounds in data/raw/uso_500ms_raw and apply the HRTFs
-    # for sound_path in tqdm(Path('data/raw/uso_500ms_raw').glob('*.wav'), desc='Sounds', position=0):
     sound = slab.Sound(stim_path).resample(48000)
     padded_sound = zero_padding(sound, goal_duration=2, type="frontback")
     training_samples = []
     for azim, elev in tqdm(src_positions, desc="HRTFs", position=1, leave=False):
-        # 20% chance to use this HRTF
         if random.random() <= 1.0:
+        # if random.random() <= selection_probability(padded_sound, elev, spectral_centroids)
             hrtf_sound = interpolate_HRTF(hrtf_label, azim, elev).apply(padded_sound)
             cochleagram = transform_stim_to_cochleagram(hrtf_sound)
             training_samples.append(
@@ -516,7 +513,7 @@ def augment_raw_sound(
 
 def generate_spatialized_sound(
     sounds: List[slab.Sound],
-    room_configs: List[RoomConfig],
+    config: Config,
     source_positions: List[SphericalCoordinates],
     brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
     path_to_brirs: Path = None,
@@ -531,11 +528,25 @@ def generate_spatialized_sound(
 
     """
 
+    centroids = build_centroid_table(sounds)
+    rng = np.random.default_rng(42)
+    cent_min = float(centroids["spectral_centroid_hz"].min())
+    cent_max = float(centroids["spectral_centroid_hz"].max())
+    sigma_elev = hz_sigma_to_elev_sigma(SIGMA_HZ, cent_min, cent_max, ELEV_MIN, ELEV_MAX)
+
     for sound in sounds:
         padded_sound = zero_padding(sound, goal_duration=2, type="frontback")
+        sound_based_elevation_distribution = compute_elevation_distribution_for_sound(
+            centroids.loc[sound.name, "spectral_centroid_hz"],
+            rng,
+            cent_min,
+            cent_max,
+            sigma_elev=sigma_elev
+        ) if config.generate_cochleagrams.probability_bias else None
+
         # Render sound at different positions
         for training_coordinates in generate_training_locations(
-            room_configs, source_positions, generation_base_probability
+            config.generate_brirs.room_configs, source_positions, generation_base_probability, sound_based_elevation_distribution
         ):
             spatialized_sound = apply_brir(
                 padded_sound,
@@ -547,11 +558,6 @@ def generate_spatialized_sound(
             if spatialized_sound is not None:
                 rms = np.sqrt(np.mean(spatialized_sound.data**2))
                 rms_for_debugging.append(rms)
-            # PBAR.update(1)
-            # Normalize sound to 0.1 RMS
-            # normalized_sound = spatialized_sound * (0.1 / np.sqrt(np.mean(spatialized_sound.data**2))) if spatialized_sound is not None else None
-
-            if spatialized_sound is not None:
                 yield spatialized_sound, training_coordinates
 
 
@@ -625,6 +631,7 @@ def generate_training_locations(
     room_configs: List[RoomConfig],
     source_positions: List[SphericalCoordinates],
     generation_base_probability: float,
+    elevation_distribution: NDArray | None,
 ) -> Generator[TrainingCoordinates, None, None]:
     #  Dict[int, RoomConfig]
     nr_listener_positions_smallest_room = min(
@@ -633,6 +640,9 @@ def generate_training_locations(
             for room in room_configs
         ]
     )
+
+    # TODO: Remove print
+    print("Elevation distribution of current sound: ", elevation_distribution)
 
     # for augmented_sound in tqdm(range(2492)):  # ca. 31s for 2492 locations (for one sound)
     for room in room_configs:
