@@ -47,7 +47,7 @@ from blcnn.experiments.elevation_bias.probability_bias import (
     ELEV_MIN,
     SIGMA_HZ,
     build_centroid_table,
-    compute_elevation_distribution_for_sound,
+    compute_elevation_distribution_for_centroid,
     hz_sigma_to_elev_sigma,
 )
 from blcnn.experiments.elevation_bias.statistical_bias import shape_training_sound
@@ -141,6 +141,10 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
     Path(dest).mkdir(parents=True, exist_ok=False)
 
     stim_paths = list(stim_path.glob("*.wav"))
+    centroids = build_centroid_table(stim_paths)
+    cent_min = float(centroids["spectral_centroid_hz"].min())
+    cent_max = float(centroids["spectral_centroid_hz"].max())
+    sigma_elev = hz_sigma_to_elev_sigma(SIGMA_HZ, cent_min, cent_max, ELEV_MIN, ELEV_MAX)
 
     path_to_backgrounds = Path(config.generate_cochleagrams.bkgd_path)
     bkgd_paths = list(path_to_backgrounds.glob("*.wav"))
@@ -195,11 +199,16 @@ def generate_cochleagrams(config: Config, stim_path: Path, hrtf_label: str):
                         )
                         test_samples += 1
             else:
+                if config.generate_cochleagrams.probability_bias:
+                    current_centroid = float(centroids.loc[single_stim_path, "spectral_centroid_hz"])
+                    elevation_distribution = compute_elevation_distribution_for_centroid(current_centroid, cent_min, cent_max, sigma_elev=sigma_elev)
+                else:
+                    elevation_distribution = None
                 for (
                     training_sample,
                     training_coords,
                 ) in generate_training_samples_from_stim_path(
-                    config, single_stim_path, path_to_brirs=path_to_brirs
+                    config, single_stim_path, path_to_brirs=path_to_brirs, elevation_distribution=elevation_distribution
                 ):
                     if random.random() < split:
                         write_tfrecord(
@@ -285,6 +294,7 @@ def generate_training_samples_from_stim_path(
     stim_path: Path,
     brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
     path_to_brirs: Path = Path("data", "brirs_2024-09-13_14-13-42"),
+    elevation_distribution: NDArray | None = None,
     no_bkgd=True,
 ) -> List[Tuple[np.ndarray, TrainingCoordinates]]:
     #     -> Generator[
@@ -318,6 +328,7 @@ def generate_training_samples_from_stim_path(
         brir_dict=brir_dict,
         path_to_brirs=path_to_brirs,
         generation_base_probability=config.generate_cochleagrams.generation_base_probability,
+        elevation_distribution=elevation_distribution,
     )
 
     training_samples = []
@@ -518,6 +529,7 @@ def generate_spatialized_sound(
     brir_dict: Dict[TrainingCoordinates, slab.Filter] = None,
     path_to_brirs: Path = None,
     generation_base_probability: float = 0.05,
+    elevation_distribution: NDArray | None = None,
 ) -> Generator[Tuple[slab.Sound, TrainingCoordinates], None, None]:
     """
     - sound generator
@@ -528,25 +540,14 @@ def generate_spatialized_sound(
 
     """
 
-    centroids = build_centroid_table(sounds)
-    rng = np.random.default_rng(42)
-    cent_min = float(centroids["spectral_centroid_hz"].min())
-    cent_max = float(centroids["spectral_centroid_hz"].max())
-    sigma_elev = hz_sigma_to_elev_sigma(SIGMA_HZ, cent_min, cent_max, ELEV_MIN, ELEV_MAX)
+
 
     for sound in sounds:
         padded_sound = zero_padding(sound, goal_duration=2, type="frontback")
-        sound_based_elevation_distribution = compute_elevation_distribution_for_sound(
-            centroids.loc[sound.name, "spectral_centroid_hz"],
-            rng,
-            cent_min,
-            cent_max,
-            sigma_elev=sigma_elev
-        ) if config.generate_cochleagrams.probability_bias else None
 
         # Render sound at different positions
         for training_coordinates in generate_training_locations(
-            config.generate_brirs.room_configs, source_positions, generation_base_probability, sound_based_elevation_distribution
+            config.generate_brirs.room_configs, source_positions, generation_base_probability, elevation_distribution
         ):
             spatialized_sound = apply_brir(
                 padded_sound,
@@ -641,8 +642,6 @@ def generate_training_locations(
         ]
     )
 
-    # TODO: Remove print
-    print("Elevation distribution of current sound: ", elevation_distribution)
 
     # for augmented_sound in tqdm(range(2492)):  # ca. 31s for 2492 locations (for one sound)
     for room in room_configs:
@@ -651,14 +650,24 @@ def generate_training_locations(
         )
         for listener_position in listener_positions_current_room:
             for source_position in source_positions:
-                if random.random() < (
-                    generation_base_probability * nr_listener_positions_smallest_room
-                ) / len(listener_positions_current_room):
-                    # Normalization works: Rooms are equally represented
-                    # Nr. of total locations is too big though 628k vs 545k in paper
-                    yield TrainingCoordinates(
-                        room.id, listener_position, source_position
-                    )
+                if elevation_distribution is None:
+                    if random.random() < (
+                        generation_base_probability * nr_listener_positions_smallest_room
+                    ) / len(listener_positions_current_room):
+                        # Normalization works: Rooms are equally represented
+                        # Nr. of total locations is too big though 628k vs 545k in paper
+                        yield TrainingCoordinates(
+                            room.id, listener_position, source_position
+                        )
+                else:
+                    if random.random() < (
+                        generation_base_probability * nr_listener_positions_smallest_room * elevation_distribution[source_position.elev] * len(elevation_distribution)
+                    ) / len(listener_positions_current_room):
+                        # Normalization works: Rooms are equally represented
+                        # Nr. of total locations is too big though 628k vs 545k in paper
+                        yield TrainingCoordinates(
+                            room.id, listener_position, source_position
+                        )
 
 
 def apply_brir(

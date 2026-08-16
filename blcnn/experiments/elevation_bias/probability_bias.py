@@ -30,23 +30,29 @@ SIGMA_HZ = 1600.0
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-def build_centroid_table(sounds: list[slab.Sound]):
+def spectral_centroid(x, sr):
+    S = np.abs(librosa.stft(x, n_fft=2048, hop_length=512))
+    return float(np.mean(librosa.feature.spectral_centroid(S=S, sr=sr)[0]))
+
+
+def load_mono(path):
+    sound = slab.Sound(path)
+    x = np.asarray(sound.data).squeeze()
+    if x.ndim == 2:
+        x = x.mean(axis=1)
+    return x, int(sound.samplerate)
+
+
+def build_centroid_table(stim_paths):
     rows = []
-    for sound in sounds:
-        centroid = sound.spectral_feature("centroid")[0]
-        rows.append({"stimulus": sound.name, "spectral_centroid_hz": centroid})
+    for path in stim_paths:
+        x, sr = load_mono(path)
+        rows.append({"stimulus": path, "spectral_centroid_hz": spectral_centroid(x, sr)})
     return pd.DataFrame(rows).set_index("stimulus")
-
-
-def elevation_to_target_centroid(elevation, elev_min, elev_max, cent_min, cent_max):
-    elev = np.clip(elevation, elev_min, elev_max)
-    t = (elev - elev_min) / (elev_max - elev_min)
-    return cent_min + t * (cent_max - cent_min)
 
 
 def centroid_to_target_elevation(centroid_hz, cent_min, cent_max, elev_min, elev_max):
     centroid_hz = np.clip(centroid_hz, cent_min, cent_max)
-    print(centroid_hz, cent_min, cent_max, elev_min, elev_max)
     t = (centroid_hz - cent_min) / (cent_max - cent_min)
     return elev_min + t * (elev_max - elev_min)
 
@@ -68,10 +74,9 @@ def selection_probabilities(values, target, sigma):
     return weights / total
 
 
-def compute_elevation_distribution_for_sound(
+def compute_elevation_distribution_for_centroid(
     centroid_hz,
     # n_locations,
-    rng,
     cent_min,
     cent_max,
     elev_min=ELEV_MIN,
