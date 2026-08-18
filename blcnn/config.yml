@@ -67,7 +67,7 @@ generate_cochleagrams:
     - slab_kemar
     # - dtf_nh2
   stim_paths: #  List of paths to stim folders. Generates cochleagrams for all hrtf and stim path combinations
-    - data/raw/stimuli
+    - data/raw/NaturalSounds
   source_positions: # Which source positions to use. Positions must be in the generated BRIRs, otherwise they're skipped.
     azimuths: [
         0,
@@ -118,7 +118,7 @@ generate_cochleagrams:
   generation_base_probability: 0.05 # Probability of generating a cochleagram for a given source position, 0.05 means 5% chance
   # Flags for elevation bias experiments
   statistical_bias: false # filter to emphasize high frequencies in higher-elevation sounds and vice-versa
-  probability_bias: true # skew distribution of sound elevations so higher-frequency sounds are played at higher elevation more often
+  probability_bias: false # skew distribution of sound elevations so higher-frequency sounds are played at higher elevation more often
 
 # Configuration for run_models.py
 run_models:

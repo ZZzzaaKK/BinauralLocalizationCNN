@@ -37,7 +37,7 @@ coloredlogs.install(
     fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-OutputMode = Literal["spherical", "spherical_folded", "cartesian"]
+OutputMode = Literal["spherical", "spherical_folded", "cartesian", "classification"]
 
 
 def fold_azimuth(azimuth: tf.Tensor) -> tf.Tensor:
@@ -92,7 +92,6 @@ def spherical_to_cartesian(
 def create_regression_example_parser(
     output_mode: OutputMode = "spherical_folded",
     normalize_targets: bool = True,
-    preprocessed: bool = False,
 ):
     """
     Create a parser function for TFRecord examples that outputs regression targets.
@@ -103,7 +102,6 @@ def create_regression_example_parser(
             - "spherical_folded": (azimuth, elevation) with azimuth folded to -90 to +90
             - "cartesian": (x, y, z) on unit sphere
         normalize_targets: If True, normalize targets to roughly [-1, 1] range
-        preprocessed: If True, expect data already downsampled to 8kHz with power
             compression applied (as produced by preprocess_tfrecord.py). Skips the
             expensive on-the-fly FIR filtering.
 
@@ -112,23 +110,26 @@ def create_regression_example_parser(
     """
 
     def parser(serialized_example):
+        # TODO: Check if name should be passed
         feature_description = {
             "train/image": tf.io.FixedLenFeature([], tf.string),
             "train/target": tf.io.FixedLenFeature([], tf.int64),
-            "train/name": tf.io.FixedLenFeature([], tf.string, default_value=""),
+            # "train/name": tf.io.FixedLenFeature([], tf.string, default_value=""),
         }
         example = tf.io.parse_single_example(serialized_example, feature_description)
         image_processed = tf.reshape(
             tf.io.decode_raw(example["train/image"], tf.float32), (39, 8000, 2)
         )
         target = example["train/target"]
+        if output_mode == "classification":
+            return image_processed, target, # example["train/name"]
         elev = tf.cast((target // 72) * 10, tf.float32)
         azim = tf.cast((target % 72) * 5, tf.float32)
-        name = example["train/name"]
+        # name = example["train/name"]
         image, coords = _make_target(
             image_processed, azim, elev, output_mode, normalize_targets
         )
-        return image, coords, name
+        return image, coords, # name
 
     return parser
 
@@ -171,7 +172,6 @@ def load_regression_dataset(
     shuffle: bool = True,
     shuffle_buffer_size: int = 1000,
     normalize_targets: bool = True,
-    preprocessed: bool = False,
 ) -> tf.data.Dataset:
     """
     Load a TFRecord file and create a dataset for regression training.
@@ -191,12 +191,12 @@ def load_regression_dataset(
     """
     logger.info(f"Loading dataset from: {tfrecord_path}")
     logger.info(
-        f"Output mode: {output_mode}, batch_size: {batch_size}, preprocessed: {preprocessed}"
+        f"Output mode: {output_mode}, batch_size: {batch_size}"
     )
 
     compression = "GZIP"
     parser = create_regression_example_parser(
-        output_mode, normalize_targets, preprocessed
+        output_mode, normalize_targets
     )
 
     dataset = tf.data.TFRecordDataset(str(tfrecord_path), compression_type=compression)
@@ -217,7 +217,6 @@ def load_multiple_tfrecords(
     batch_size: int = 16,
     shuffle: bool = True,
     normalize_targets: bool = True,
-    preprocessed: bool = False,
 ) -> tf.data.Dataset:
     """
     Load multiple TFRecord files and combine into a single dataset.
@@ -235,7 +234,7 @@ def load_multiple_tfrecords(
     """
     compression = "GZIP"
     parser = create_regression_example_parser(
-        output_mode, normalize_targets, preprocessed
+        output_mode, normalize_targets
     )
 
     # Interleave multiple files for better shuffling

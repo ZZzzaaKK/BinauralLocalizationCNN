@@ -17,10 +17,12 @@ import tensorflow as tf
 from data_loader import load_multiple_tfrecords, load_regression_dataset
 from net_builder import (
     OutputMode,
+    compile_classification_model,
     compile_regression_model,
     create_regression_model_from_pretrained,
     load_pretrained_classification_model,
     print_model_summary,
+    retrain_classification_model,
 )
 
 logger = tf.get_logger()
@@ -105,19 +107,20 @@ def create_callbacks(output_dir: Path, patience: int = 10) -> list:
 def train_regression_model(
     pretrained_model_path: Path,
     train_data_path: Path,
-    val_data_path: Path = None,
+    val_data_path: Path | None = None,
     output_dir: Path = Path("models/regression"),
     output_mode: OutputMode = "spherical_folded",
     batch_size: int = 16,
     epochs: int = 100,
     learning_rate: float = 0.001,
+    patience: int = 10,
     freeze_conv_layers: bool = True,
-    num_unfrozen_layers: int = None,
+    num_unfrozen_layers: int | None = None,
     validation_split: float = 0.1,
-    max_train_batches: int = None,
-    max_val_batches: int = None,
+    max_train_batches: int | None = None,
+    max_val_batches: int | None = None,
     shuffle_buffer_size: int = 1000,
-    preprocessed: bool = False,
+    classification: bool = False,
 ) -> keras.Model:
     """
     Train a regression model by fine-tuning a pretrained classification model.
@@ -130,12 +133,14 @@ def train_regression_model(
         output_mode: Coordinate system for outputs
         batch_size: Training batch size
         epochs: Maximum number of epochs
+        patience: Number of epochs after which training should stop if the model did not improve
         learning_rate: Initial learning rate
         freeze_conv_layers: Whether to freeze convolutional layers
         validation_split: Fraction of training data for validation (if no val_data_path)
         max_train_batches: Limit training batches per epoch (None = use all data)
         max_val_batches: Limit validation batches per epoch (None = use all data)
         shuffle_buffer_size: Size of shuffle buffer (smaller = faster startup, less random)
+        classification: Whether to treat outputs as classification labels
 
     Returns:
         Trained model
@@ -152,22 +157,32 @@ def train_regression_model(
     pretrained_model = load_pretrained_classification_model(pretrained_model_path)
 
     # Create regression model
-    regression_model = create_regression_model_from_pretrained(
-        pretrained_model,
-        output_mode=output_mode,
-        freeze_conv_layers=freeze_conv_layers,
-        num_unfrozen_layers=num_unfrozen_layers,
-    )
+    if classification:
+        output_mode = "classification"
+        model = retrain_classification_model(
+            pretrained_model,
+            freeze_conv_layers=freeze_conv_layers,
+            num_unfrozen_layers=num_unfrozen_layers,
+        )
 
-    # Compile model
-    regression_model = compile_regression_model(
-        regression_model,
-        output_mode=output_mode,
-        learning_rate=learning_rate,
-    )
+        model = compile_classification_model(model, learning_rate=learning_rate)
+    else:
+        model = create_regression_model_from_pretrained(
+            pretrained_model,
+            output_mode=output_mode,
+            freeze_conv_layers=freeze_conv_layers,
+            num_unfrozen_layers=num_unfrozen_layers,
+        )
+
+        model = compile_regression_model(
+            model,
+            output_mode=output_mode,
+            learning_rate=learning_rate,
+            use_angular_loss=True,
+        )
 
     # Print model info
-    print_model_summary(regression_model)
+    print_model_summary(model)
 
     # Load data
     train_data_path = Path(train_data_path)
@@ -181,7 +196,6 @@ def train_regression_model(
             output_mode=output_mode,
             batch_size=batch_size,
             shuffle=True,
-            preprocessed=preprocessed,
         )
     else:
         # Single TFRecord file
@@ -191,7 +205,6 @@ def train_regression_model(
             batch_size=batch_size,
             shuffle=True,
             shuffle_buffer_size=shuffle_buffer_size,
-            preprocessed=preprocessed,
         )
 
         # If no separate validation data, split the training data using sharding
@@ -206,18 +219,40 @@ def train_regression_model(
             # iterate through the skipped data first
             shard_size = int(1.0 / validation_split)  # e.g., 0.1 -> every 10th sample
 
-            # Recreate datasets with sharding (need to reload to avoid consuming iterator)
+            # TODO: Remove these lines in favor of the ones below next TODO
+            # Recreate datasets with sharding ...
             val_dataset = load_regression_dataset(
                 train_data_path,
                 output_mode=output_mode,
                 batch_size=batch_size,
                 shuffle=False,  # Don't shuffle validation
                 shuffle_buffer_size=shuffle_buffer_size,
-                preprocessed=preprocessed,
-            ).shard(num_shards=shard_size, index=0)  # Take every Nth batch for val
+            ).shard(num_shards=shard_size, index=0)
 
-            # Training uses all other shards
             train_dataset = full_dataset.shard(num_shards=shard_size, index=1)
+
+            # Validation: every Nth batch (unshuffled load for stable val set)
+            # TODO: Unshuffled load means some validation data lands in the training dataset. May want to find cleaner separation logic
+            # val_dataset = (
+            #     load_regression_dataset(
+            #         train_data_path,
+            #         output_mode=output_mode,
+            #         batch_size=batch_size,
+            #         shuffle=False,
+            #         shuffle_buffer_size=shuffle_buffer_size,
+            #     )
+            #     .enumerate()
+            #     .filter(lambda x: x[0] % shard_size == 0)
+            #     .map(lambda i, batch: batch)
+            # )
+
+            # # Training: all the other batches
+            # train_dataset = (
+            #     full_dataset
+            #     .enumerate()
+            #     .filter(lambda x: x[0] % shard_size != 0)
+            #     .map(lambda i, batch: batch)
+            # )
 
             logger.info(f"Using shard-based split: 1/{shard_size} for validation")
         elif val_data_path is None:
@@ -235,7 +270,6 @@ def train_regression_model(
             output_mode=output_mode,
             batch_size=batch_size,
             shuffle=False,
-            preprocessed=preprocessed,
         )
 
     # Limit batches if specified (useful for quick testing)
@@ -248,11 +282,11 @@ def train_regression_model(
         logger.info(f"Limiting validation to {max_val_batches} batches per epoch")
 
     # Create callbacks
-    callbacks = create_callbacks(output_dir)
+    callbacks = create_callbacks(output_dir, patience)
 
     # Train
     logger.info("Starting training...")
-    history = regression_model.fit(
+    history = model.fit(
         train_dataset,
         validation_data=val_dataset if val_dataset is not None else None,
         epochs=epochs,
@@ -270,7 +304,7 @@ def train_regression_model(
 
     # Save final model
     final_model_path = output_dir / "final_model.keras"
-    regression_model.save(final_model_path)
+    model.save(final_model_path)
     logger.info(f"Final model saved to: {final_model_path}")
 
     # Save training summary
@@ -290,7 +324,7 @@ Configuration:
 
 Final metrics:
 - Train loss: {history.history["loss"][-1]:.4f}
-- Train MAE: {history.history["mae"][-1]:.4f}
+- Train MAE: {history.history.get("mae", [None])[-1]:.4f}
 - Val loss: {history.history.get("val_loss", [None])[-1]}
 - Val MAE: {history.history.get("val_mae", [None])[-1]}
 
@@ -302,7 +336,7 @@ Best val_loss: {min(history.history["val_loss"]) if "val_loss" in history.histor
 
     logger.info(summary)
 
-    return regression_model
+    return model
 
 
 def main():
@@ -338,7 +372,7 @@ def main():
         "--output-mode",
         type=str,
         default="spherical_folded",
-        choices=["spherical", "spherical_folded", "cartesian"],
+        choices=["spherical", "spherical_folded", "cartesian", "classification"],
         help="Output coordinate system",
     )
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
@@ -347,6 +381,9 @@ def main():
     )
     parser.add_argument(
         "--learning-rate", type=float, default=0.001, help="Initial learning rate"
+    )
+    parser.add_argument(
+        "--patience", type=int, default=10, help="Number of epochs after which training should stop if the model did not improve"
     )
     parser.add_argument(
         "--unfreeze-conv",
@@ -384,9 +421,9 @@ def main():
         help="Shuffle buffer size (smaller = faster startup, less random; default: 1000)",
     )
     parser.add_argument(
-        "--preprocessed",
+        "--classification",
         action="store_true",
-        help="Data was preprocessed with preprocess_tfrecord.py (already 8kHz + power compressed)",
+        help="If set to false, model performs classification re-training instead"
     )
 
     args = parser.parse_args()
@@ -402,13 +439,14 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
+        patience=args.patience,
         freeze_conv_layers=not args.unfreeze_conv,
         num_unfrozen_layers=args.num_unfrozen_layers,
         max_train_batches=args.max_train_batches,
         max_val_batches=args.max_val_batches,
         validation_split=args.validation_split,
         shuffle_buffer_size=args.shuffle_buffer_size,
-        preprocessed=args.preprocessed,
+        classification=args.classification,
     )
 
 

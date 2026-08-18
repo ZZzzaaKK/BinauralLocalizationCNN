@@ -72,7 +72,6 @@ def run_inference(
     parser = create_regression_example_parser(
         output_mode=output_mode,
         normalize_targets=True,
-        preprocessed=False,
     )
     dataset = (
         tf.data.TFRecordDataset(str(data_path), compression_type="GZIP")

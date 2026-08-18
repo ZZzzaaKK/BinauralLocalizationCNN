@@ -13,9 +13,6 @@ import coloredlogs
 import keras
 import tensorflow as tf
 from keras import layers
-from tensorflow.python.eager.polymorphic_function.eager_function_run import (
-    run_functions_eagerly,
-)
 
 logger = tf.get_logger()
 logger.setLevel(logging.DEBUG)
@@ -27,7 +24,7 @@ coloredlogs.install(
 
 
 # Output mode types
-OutputMode = Literal["spherical", "spherical_folded", "cartesian"]
+OutputMode = Literal["spherical", "spherical_folded", "cartesian", "classification"]
 
 
 def load_pretrained_classification_model(model_path: Path) -> keras.Model:
@@ -131,6 +128,7 @@ def create_regression_model_from_pretrained(
                 and isinstance(layer, layers.Dense)
                 and "regression" not in layer.name
             ):
+                # TODO: Make sure setting this false is actually correct! Was False before, but don't understand why yet.
                 layer.trainable = False
 
     # Count trainable vs frozen
@@ -142,6 +140,61 @@ def create_regression_model_from_pretrained(
 
     return regression_model
 
+
+def retrain_classification_model(
+    pretrained_model: keras.Model,
+    freeze_conv_layers: bool = True,
+    freeze_fc_layers: bool = False,
+    num_unfrozen_layers: int | None = None,
+) -> keras.Model:
+    """
+    Retrain a classification model according to the same workflow as regressive model re-training.
+    """
+    logger.info("Retraining classification model")
+
+    if num_unfrozen_layers is not None:
+        for layer in pretrained_model.layers[:-num_unfrozen_layers]:
+            layer.trainable = False
+        for layer in pretrained_model.layers[-num_unfrozen_layers:]:
+            layer.trainable = True
+        logger.info(f"Unfreezing last {num_unfrozen_layers} layers")
+    else:
+        for layer in pretrained_model.layers:
+            if freeze_conv_layers and isinstance(
+                layer, (layers.Conv2D, layers.ZeroPadding2D, layers.BatchNormalization)
+            ):
+                layer.trainable = False
+            elif (
+                freeze_fc_layers
+                and isinstance(layer, layers.Dense)
+                and layer is not pretrained_model.layers[-1]
+            ):
+                # TODO: Make sure setting this false is actually correct! Was False before, but don't understand why yet.
+                layer.trainable = False
+
+    # Count trainable vs frozen
+    trainable_count = sum(1 for layer in pretrained_model.layers if layer.trainable)
+    frozen_count = len(pretrained_model.layers) - trainable_count
+    logger.info(
+        f"Model has {trainable_count} trainable layers and {frozen_count} frozen layers"
+    )
+
+    return pretrained_model
+
+def compile_classification_model(
+    model: keras.Model,
+    learning_rate: float = 0.001,
+):
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+    model.compile(
+        optimizer=optimizer,
+        loss="sparse_categorical_crossentropy",
+        metrics=["sparse_categorical_accuracy"],
+    )
+
+    logger.info(f"Classification retrained model compiled with learning rate={learning_rate}")
+
+    return model
 
 def angular_distance_loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
     """
