@@ -219,40 +219,28 @@ def train_regression_model(
             # iterate through the skipped data first
             shard_size = int(1.0 / validation_split)  # e.g., 0.1 -> every 10th sample
 
-            # TODO: Remove these lines in favor of the ones below next TODO
-            # Recreate datasets with sharding ...
-            val_dataset = load_regression_dataset(
-                train_data_path,
-                output_mode=output_mode,
-                batch_size=batch_size,
-                shuffle=False,  # Don't shuffle validation
-                shuffle_buffer_size=shuffle_buffer_size,
-            ).shard(num_shards=shard_size, index=0)
-
-            train_dataset = full_dataset.shard(num_shards=shard_size, index=1)
-
             # Validation: every Nth batch (unshuffled load for stable val set)
             # TODO: Unshuffled load means some validation data lands in the training dataset. May want to find cleaner separation logic
-            # val_dataset = (
-            #     load_regression_dataset(
-            #         train_data_path,
-            #         output_mode=output_mode,
-            #         batch_size=batch_size,
-            #         shuffle=False,
-            #         shuffle_buffer_size=shuffle_buffer_size,
-            #     )
-            #     .enumerate()
-            #     .filter(lambda x: x[0] % shard_size == 0)
-            #     .map(lambda i, batch: batch)
-            # )
+            val_dataset = (
+                load_regression_dataset(
+                    train_data_path,
+                    output_mode=output_mode,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    shuffle_buffer_size=shuffle_buffer_size,
+                )
+                .enumerate()
+                .filter(lambda i, batch: i % shard_size == 0)
+                .map(lambda i, batch: batch)
+            )
 
-            # # Training: all the other batches
-            # train_dataset = (
-            #     full_dataset
-            #     .enumerate()
-            #     .filter(lambda x: x[0] % shard_size != 0)
-            #     .map(lambda i, batch: batch)
-            # )
+            # Training: all the other batches
+            train_dataset = (
+                full_dataset
+                .enumerate()
+                .filter(lambda i, batch: i % shard_size != 0)
+                .map(lambda i, batch: batch)
+            )
 
             logger.info(f"Using shard-based split: 1/{shard_size} for validation")
         elif val_data_path is None:
