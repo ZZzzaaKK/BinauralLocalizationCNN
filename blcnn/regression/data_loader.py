@@ -114,7 +114,7 @@ def create_regression_example_parser(
         feature_description = {
             "train/image": tf.io.FixedLenFeature([], tf.string),
             "train/target": tf.io.FixedLenFeature([], tf.int64),
-            # "train/name": tf.io.FixedLenFeature([], tf.string, default_value=""),
+            "train/name": tf.io.FixedLenFeature([], tf.string, default_value=""),
         }
         example = tf.io.parse_single_example(serialized_example, feature_description)
         image_processed = tf.reshape(
@@ -122,14 +122,14 @@ def create_regression_example_parser(
         )
         target = example["train/target"]
         if output_mode == "classification":
-            return image_processed, target, # example["train/name"]
+            return image_processed, target, example["train/name"]
         elev = tf.cast((target // 72) * 10, tf.float32)
         azim = tf.cast((target % 72) * 5, tf.float32)
-        # name = example["train/name"]
+        name = example["train/name"]
         image, coords = _make_target(
             image_processed, azim, elev, output_mode, normalize_targets
         )
-        return image, coords, # name
+        return image, coords, name
 
     return parser
 

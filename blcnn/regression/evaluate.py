@@ -72,11 +72,11 @@ def main():
         dataset = dataset.take(args.max_batches)
 
     # Collect ground truth once
-    labels = np.concatenate([y.numpy() for _, y in dataset])
+    labels = np.concatenate([y.numpy() for _, y, _ in dataset])
     azim_true_raw, elev_true = class_to_degrees(labels)
     azim_true = fold_azimuth_np(azim_true_raw)
 
-    images_only = dataset.map(lambda x, y: x)
+    images_only = dataset.map(lambda x, y, names: x)
 
     if args.classification_model:
         # compile=False avoids needing the original loss/metrics to deserialize
