@@ -172,6 +172,7 @@ def load_regression_dataset(
     shuffle: bool = True,
     shuffle_buffer_size: int = 1000,
     normalize_targets: bool = True,
+    drop_name: bool = True,
 ) -> tf.data.Dataset:
     """
     Load a TFRecord file and create a dataset for regression training.
@@ -201,6 +202,9 @@ def load_regression_dataset(
 
     dataset = tf.data.TFRecordDataset(str(tfrecord_path), compression_type=compression)
     dataset = dataset.map(parser, num_parallel_calls=tf.data.AUTOTUNE)
+
+    if drop_name:
+        dataset = dataset.map(lambda img, coords, name: (img, coords))
 
     if shuffle:
         dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)

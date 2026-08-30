@@ -304,6 +304,7 @@ Elapsed time: {elapsed_time}
 
 Configuration:
 - Pretrained model: {pretrained_model_path}
+- Used cochleagrams: {train_data_path}
 - Output mode: {output_mode}
 - Batch size: {batch_size}
 - Initial learning rate: {learning_rate}

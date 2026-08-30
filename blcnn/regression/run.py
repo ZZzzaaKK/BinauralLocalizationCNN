@@ -23,7 +23,7 @@ import numpy as np
 import tensorflow as tf
 from data_loader import (
     OutputMode,
-    create_regression_example_parser,
+    load_regression_dataset,
 )
 
 logger = tf.get_logger()
@@ -66,18 +66,14 @@ def run_inference(
     batch_size: int = 64,
 ) -> None:
     logger.info(f"Loading model: {model_path}")
-    model = keras.models.load_model(model_path)
+    model = keras.models.load_model(model_path, compile=False)
 
     logger.info(f"Loading data: {data_path}")
-    parser = create_regression_example_parser(
-        output_mode=output_mode,
-        normalize_targets=True,
-    )
-    dataset = (
-        tf.data.TFRecordDataset(str(data_path), compression_type="GZIP")
-        .map(parser, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(batch_size)
-        .prefetch(tf.data.AUTOTUNE)
+    dataset = load_regression_dataset(
+        Path(data_path),
+        batch_size=batch_size,
+        shuffle=False,
+        drop_name=False,
     )
 
     all_preds = []

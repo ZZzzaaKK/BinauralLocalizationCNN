@@ -8,7 +8,6 @@ from pathlib import Path
 
 import keras
 import numpy as np
-import tensorflow as tf
 from data_loader import load_regression_dataset
 
 
@@ -68,15 +67,16 @@ def main():
         batch_size=args.batch_size,
         shuffle=False,
     )
+
     if args.max_batches:
         dataset = dataset.take(args.max_batches)
 
     # Collect ground truth once
-    labels = np.concatenate([y.numpy() for _, y, _ in dataset])
+    labels = np.concatenate([y.numpy() for _, y in dataset])
     azim_true_raw, elev_true = class_to_degrees(labels)
     azim_true = fold_azimuth_np(azim_true_raw)
 
-    images_only = dataset.map(lambda x, y, names: x)
+    images_only = dataset.map(lambda x, y: x)
 
     if args.classification_model:
         # compile=False avoids needing the original loss/metrics to deserialize
@@ -91,6 +91,12 @@ def main():
     if args.regression_model:
         model = keras.models.load_model(args.regression_model, compile=False)
         preds = model.predict(images_only, verbose=1)
+        # TODO: Remove these prints after fixing error
+        print(preds[:10])
+        print("raw preds min/max:", preds.min(0), preds.max(0))
+        print("raw preds mean:", preds.mean(0))
+        print("raw preds std:", preds.std(0))
+
         # Denormalize spherical_folded targets (azim/90, elev/60 in data_loader)
         azim_pred = preds[:, 0] * 90.0
         elev_pred = preds[:, 1] * 60.0
