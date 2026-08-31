@@ -5,7 +5,7 @@ Runs a trained regression model on a preprocessed TFRecord and saves
 predicted vs. true (azimuth, elevation) to a CSV file.
 
 Usage:
-    python blcnn/run_regression.py \
+    python blcnn/run.py \
         --model   models/regression/2026-03-01_14-51-17/final_model.keras \
         --data    data/cochleagrams/slab_kemar/cochleagrams_8k.tfrecord \
         --output  data/output/regression_predictions.csv

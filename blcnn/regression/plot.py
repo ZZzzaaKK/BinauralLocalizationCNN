@@ -19,13 +19,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from plotting import plot_localization_accuracy
 
 
 def load_csv(path: Path) -> np.ndarray:
     """Load CSV and return (N, 4) array: [true_azim, true_elev, pred_azim, pred_elev]."""
-    data = np.loadtxt(path, delimiter=",", skiprows=1)
+    data = np.loadtxt(path, delimiter=",", skiprows=1, usecols=(1,2,3,4))
     # Round true labels to nearest integer to avoid float precision issues
     # (they were integers before normalization)
     data[:, :2] = np.round(data[:, :2])
